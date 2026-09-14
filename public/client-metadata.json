@@ -1,0 +1,19 @@
+{
+  "client_id": "https://bye-sky.web.app/client-metadata.json",
+  "client_name": "ByeSky",
+  "client_uri": "https://bye-sky.web.app",
+  "redirect_uris": [
+    "https://bye-sky.web.app/"
+  ],
+  "scope": "atproto transition:generic repo:app.bsky.graph.follow",
+  "grant_types": [
+    "authorization_code",
+    "refresh_token"
+  ],
+  "response_types": [
+    "code"
+  ],
+  "token_endpoint_auth_method": "none",
+  "application_type": "web",
+  "dpop_bound_access_tokens": true
+}
