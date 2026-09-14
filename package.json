@@ -2,21 +2,31 @@
   "name": "byesky",
   "version": "1.0.0",
   "description": "ByeSky — Bluesky Followings Cleanup",
+  "keywords": [],
+  "license": "ISC",
+  "author": "",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
     "build": "vite build",
+    "check": "npm run format:check && npm run lint && npm run test",
+    "dev": "vite --host 127.0.0.1",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
     "preview": "vite preview",
     "test": "node --test"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
     "@atproto/api": "^0.20.44",
     "@atproto/oauth-client-browser": "^0.3.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "eslint-plugin-security": "^4.0.1",
+    "eslint-plugin-sonarjs": "^4.2.0",
+    "prettier": "^3.9.6",
+    "prettier-plugin-packagejson": "^3.0.2",
     "vite": "^6.0.0"
   }
 }

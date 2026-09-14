@@ -19,7 +19,7 @@ class UserSyncCache {
 
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(this.dbName, this.dbVersion);
-      
+
       request.onupgradeneeded = (e) => {
         const db = e.target.result;
         if (!db.objectStoreNames.contains(this.storeName)) {
@@ -81,7 +81,7 @@ class UserSyncCache {
         progress: {
           total: 0,
           processed: 0,
-          currentStage: 'Not started'
+          currentStage: 'Not started',
         },
         followings: [],
         interactions: {
@@ -90,9 +90,9 @@ class UserSyncCache {
           repliedBy: [],
           messagedBy: [],
           userInteractedWith: [],
-          userOutboundInteractions: []
+          userOutboundInteractions: [],
         },
-        lastUpdated: null
+        lastUpdated: null,
       });
     }
     return this.store.get(did);
@@ -134,7 +134,7 @@ class UserSyncCache {
     current.progress = {
       total: total !== undefined ? total : current.progress.total,
       processed: processed !== undefined ? processed : current.progress.processed,
-      currentStage: stage || current.progress.currentStage
+      currentStage: stage || current.progress.currentStage,
     };
     current.lastUpdated = Date.now();
     await this.set(did, current);

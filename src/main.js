@@ -4,24 +4,24 @@ import { syncCache } from './cache.js';
 
 // Application State
 let state = {
-  user: null,       // { loggedIn: false } or { loggedIn: true, did, handle }
-  session: null,    // Active OAuthSession object
-  agent: null,      // ATProto Agent instance
+  user: null, // { loggedIn: false } or { loggedIn: true, did, handle }
+  session: null, // Active OAuthSession object
+  agent: null, // ATProto Agent instance
   sync: {
     status: 'idle',
     error: null,
     progress: { total: 0, processed: 0, currentStage: 'Not started' },
-    totalCount: 0
+    totalCount: 0,
   },
   followings: [], // Raw followings from backend
   selectedDids: new Set(), // DIDs marked for unfollowing
   pagination: {
     currentPage: 1,
-    pageSize: 100
+    pageSize: 100,
   },
   sorting: {
     col: 'score',
-    order: 'desc' // High score (strongest unfollow reason) shown first
+    order: 'desc', // High score (strongest unfollow reason) shown first
   },
   searchQuery: '',
   weights: {
@@ -36,7 +36,7 @@ let state = {
     massFollower: 1,
     spammyRatio: 1,
     flagged: 3,
-    outlier: 1
+    outlier: 1,
   },
   filters: {
     ok: true,
@@ -52,15 +52,15 @@ let state = {
     massFollower: true,
     spammyRatio: true,
     flagged: true,
-    outlier: true
+    outlier: true,
   },
   params: {
     inactiveDays: 180,
     lowFollowersThreshold: 50,
     noisyPostsThreshold: 20,
-    massFollowerThreshold: 3500
+    massFollowerThreshold: 3500,
   },
-  pendingUnfollowDids: [] // Holds DIDs during confirmation modal
+  pendingUnfollowDids: [], // Holds DIDs during confirmation modal
 };
 
 // DOM Elements
@@ -139,13 +139,26 @@ function setupEventListeners() {
   resyncBtn.addEventListener('click', triggerSync);
 
   // Live weights adjustments
-  const weights = ['not-following', 'inactive', 'no-inbound', 'no-outbound', 'deleted-banned', 'blocking', 'noisy', 'muted', 'mass-follower', 'spammy-ratio', 'flagged', 'outlier'];
-  weights.forEach(w => {
+  const weights = [
+    'not-following',
+    'inactive',
+    'no-inbound',
+    'no-outbound',
+    'deleted-banned',
+    'blocking',
+    'noisy',
+    'muted',
+    'mass-follower',
+    'spammy-ratio',
+    'flagged',
+    'outlier',
+  ];
+  weights.forEach((w) => {
     const slider = document.getElementById(`weight-${w}`);
     const valDisplay = document.getElementById(`val-${w}`);
-    
+
     // Convert hyphenated back to camelCase for state
-    const stateKey = w.replace(/-([a-z])/g, g => g[1].toUpperCase());
+    const stateKey = w.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
 
     slider.addEventListener('input', (e) => {
       const val = parseInt(e.target.value, 10);
@@ -170,10 +183,10 @@ function setupEventListeners() {
     { id: 'filter-mass-follower', key: 'massFollower' },
     { id: 'filter-spammy-ratio', key: 'spammyRatio' },
     { id: 'filter-flagged', key: 'flagged' },
-    { id: 'filter-outlier', key: 'outlier' }
+    { id: 'filter-outlier', key: 'outlier' },
   ];
 
-  filterCheckboxes.forEach(f => {
+  filterCheckboxes.forEach((f) => {
     const checkbox = document.getElementById(f.id);
     checkbox.addEventListener('change', (e) => {
       state.filters[f.key] = e.target.checked;
@@ -199,7 +212,7 @@ function setupEventListeners() {
     let val = parseInt(e.target.value, 10) || 20;
     if (val > 100) {
       val = 100;
-      e.target.value = "100";
+      e.target.value = '100';
     }
     state.params.noisyPostsThreshold = val;
     renderDashboard();
@@ -226,7 +239,7 @@ function setupEventListeners() {
   selectAllCheckbox.addEventListener('change', handleSelectAllToggle);
 
   // Table header sorting
-  document.querySelectorAll('.sortable').forEach(th => {
+  document.querySelectorAll('.sortable').forEach((th) => {
     th.addEventListener('click', () => {
       const sortCol = th.dataset.sort;
       if (state.sorting.col === sortCol) {
@@ -240,7 +253,7 @@ function setupEventListeners() {
   });
 
   // Pagination buttons (bound to both top and bottom sets)
-  prevPageBtns.forEach(btn => {
+  prevPageBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
       if (state.pagination.currentPage > 1) {
         state.pagination.currentPage--;
@@ -250,7 +263,7 @@ function setupEventListeners() {
     });
   });
 
-  nextPageBtns.forEach(btn => {
+  nextPageBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
       const totalPages = Math.ceil(getFilteredAndSortedList().length / state.pagination.pageSize);
       if (state.pagination.currentPage < totalPages) {
@@ -267,7 +280,7 @@ function setupEventListeners() {
     if (dids.length > 0) {
       if (dids.length > 10) {
         state.pendingUnfollowDids = dids;
-        modalTitle.textContent = "Batch Unfollow Confirmation";
+        modalTitle.textContent = 'Batch Unfollow Confirmation';
         modalDesc.textContent = `Are you sure you want to unfollow ${dids.length} selected accounts? This batch operation cannot be easily undone.`;
         confirmModal.classList.remove('hidden');
       } else {
@@ -304,16 +317,20 @@ function setupEventListeners() {
 }
 
 function initializeStateFromDOM() {
-  state.weights.notFollowing = parseInt(document.getElementById('weight-not-following').value, 10) || 1;
+  state.weights.notFollowing =
+    parseInt(document.getElementById('weight-not-following').value, 10) || 1;
   state.weights.inactive = parseInt(document.getElementById('weight-inactive').value, 10) || 4;
   state.weights.noInbound = parseInt(document.getElementById('weight-no-inbound').value, 10) || 1;
   state.weights.noOutbound = parseInt(document.getElementById('weight-no-outbound').value, 10) || 5;
-  state.weights.deletedBanned = parseInt(document.getElementById('weight-deleted-banned').value, 10) || 4;
+  state.weights.deletedBanned =
+    parseInt(document.getElementById('weight-deleted-banned').value, 10) || 4;
   state.weights.blocking = parseInt(document.getElementById('weight-blocking').value, 10) || 4;
   state.weights.noisy = parseInt(document.getElementById('weight-noisy').value, 10) || 1;
   state.weights.muted = parseInt(document.getElementById('weight-muted').value, 10) || 4;
-  state.weights.massFollower = parseInt(document.getElementById('weight-mass-follower').value, 10) || 1;
-  state.weights.spammyRatio = parseInt(document.getElementById('weight-spammy-ratio').value, 10) || 1;
+  state.weights.massFollower =
+    parseInt(document.getElementById('weight-mass-follower').value, 10) || 1;
+  state.weights.spammyRatio =
+    parseInt(document.getElementById('weight-spammy-ratio').value, 10) || 1;
   state.weights.flagged = parseInt(document.getElementById('weight-flagged').value, 10) || 3;
   state.weights.outlier = parseInt(document.getElementById('weight-outlier').value, 10) || 1;
 
@@ -332,15 +349,18 @@ function initializeStateFromDOM() {
   state.filters.flagged = document.getElementById('filter-flagged').checked;
   state.filters.outlier = document.getElementById('filter-outlier').checked;
 
-  state.params.inactiveDays = parseInt(document.getElementById('param-inactive-days').value, 10) || 180;
-  state.params.lowFollowersThreshold = parseInt(document.getElementById('param-low-followers').value, 10) || 50;
+  state.params.inactiveDays =
+    parseInt(document.getElementById('param-inactive-days').value, 10) || 180;
+  state.params.lowFollowersThreshold =
+    parseInt(document.getElementById('param-low-followers').value, 10) || 50;
   let noisyVal = parseInt(document.getElementById('param-noisy-posts').value, 10) || 20;
   if (noisyVal > 100) {
     noisyVal = 100;
-    document.getElementById('param-noisy-posts').value = "100";
+    document.getElementById('param-noisy-posts').value = '100';
   }
   state.params.noisyPostsThreshold = noisyVal;
-  state.params.massFollowerThreshold = parseInt(document.getElementById('param-mass-follower').value, 10) || 3500;
+  state.params.massFollowerThreshold =
+    parseInt(document.getElementById('param-mass-follower').value, 10) || 3500;
 }
 
 // --- Session & Authentication ---
@@ -352,16 +372,18 @@ async function checkSession() {
     if (result && result.session) {
       state.session = result.session;
       state.agent = new Agent(result.session);
-      
+
       // Fetch profile via public AppView to completely bypass PDS CORS/proxy blocks on login
       const publicAgent = new Agent({ service: 'https://api.bsky.app' });
-      const profile = await publicAgent.api.app.bsky.actor.getProfile({ actor: result.session.did });
+      const profile = await publicAgent.api.app.bsky.actor.getProfile({
+        actor: result.session.did,
+      });
       state.user = {
         loggedIn: true,
         did: result.session.did,
-        handle: profile.data.handle
+        handle: profile.data.handle,
       };
-      
+
       showUserSession(state.user.handle);
       await checkSyncStatus();
     } else {
@@ -402,7 +424,7 @@ async function handleLogout() {
     }
     await syncCache.clear(state.user.did);
   }
-  
+
   state.user = null;
   state.session = null;
   state.agent = null;
@@ -448,23 +470,23 @@ async function triggerSync() {
   if (!state.user) return;
   state.selectedDids.clear();
   selectAllCheckbox.checked = false;
-  
+
   try {
     // 1. Signal cancellation to any currently running background sync thread
     await syncCache.set(state.user.did, {
       status: 'cancelled',
-      error: null
+      error: null,
     });
 
     // 2. Wait 300ms for active workers to detect cancellation and shut down gracefully
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, 300));
 
     // 3. Initialize fresh sync state
     await syncCache.set(state.user.did, {
       status: 'idle',
-      error: null
+      error: null,
     });
-    
+
     // Instantly check status & start background execution
     const cachedState = await syncCache.get(state.user.did);
     showSyncSection(cachedState);
@@ -511,11 +533,11 @@ async function onSyncUpdate() {
 
 async function loadFollowings() {
   if (!state.user) return;
-  
+
   try {
     const cachedState = await syncCache.get(state.user.did);
     state.followings = cachedState.followings || [];
-    
+
     // Hide progress and auth connection card, show dashboard
     authSection.classList.add('hidden');
     syncSection.classList.add('hidden');
@@ -532,7 +554,7 @@ function calculateScore(item) {
     return state.weights.deletedBanned;
   }
   let score = 0;
-  
+
   if (!item.criteria.isFollowingUser) {
     score += state.weights.notFollowing;
   }
@@ -542,11 +564,12 @@ function calculateScore(item) {
     score += state.weights.inactive;
   }
 
-  const hasInbound = item.criteria.hasLikedUser || 
-                     item.criteria.hasRepostedUser || 
-                     item.criteria.hasRepliedToUser || 
-                     item.criteria.hasMessagedUser || 
-                     item.criteria.userInteracted;
+  const hasInbound =
+    item.criteria.hasLikedUser ||
+    item.criteria.hasRepostedUser ||
+    item.criteria.hasRepliedToUser ||
+    item.criteria.hasMessagedUser ||
+    item.criteria.userInteracted;
   if (!hasInbound) {
     score += state.weights.noInbound;
   }
@@ -613,100 +636,105 @@ function isUserMassFollower(item) {
 }
 
 function getFilteredAndSortedList() {
-  return state.followings.map(item => {
-    const score = calculateScore(item);
-    const dynamicInactive = isUserInactive(item);
-    return { ...item, score, dynamicInactive };
-  }).filter(item => {
-    // Search
-    if (state.searchQuery) {
-      const q = state.searchQuery.toLowerCase();
-      const nMatch = item.displayName && item.displayName.toLowerCase().includes(q);
-      const hMatch = item.handle && item.handle.toLowerCase().includes(q);
-      if (!nMatch && !hMatch) return false;
-    }
+  return state.followings
+    .map((item) => {
+      const score = calculateScore(item);
+      const dynamicInactive = isUserInactive(item);
+      return { ...item, score, dynamicInactive };
+    })
+    .filter((item) => {
+      // Search
+      if (state.searchQuery) {
+        const q = state.searchQuery.toLowerCase();
+        const nMatch = item.displayName && item.displayName.toLowerCase().includes(q);
+        const hMatch = item.handle && item.handle.toLowerCase().includes(q);
+        if (!nMatch && !hMatch) return false;
+      }
 
-    // Determine warning/inactive criteria matches
-    const hasInbound = item.criteria.hasLikedUser || 
-                       item.criteria.hasRepostedUser || 
-                       item.criteria.hasRepliedToUser || 
-                       item.criteria.hasMessagedUser || 
-                       item.criteria.userInteracted;
+      // Determine warning/inactive criteria matches
+      const hasInbound =
+        item.criteria.hasLikedUser ||
+        item.criteria.hasRepostedUser ||
+        item.criteria.hasRepliedToUser ||
+        item.criteria.hasMessagedUser ||
+        item.criteria.userInteracted;
 
-    const hasOutbound = item.criteria.userContactedThem;
+      const hasOutbound = item.criteria.userContactedThem;
 
-    const criteriaMatches = {
-      notFollowing: !item.criteria.isFollowingUser,
-      inactive: item.dynamicInactive,
-      noInbound: !hasInbound,
-      noOutbound: !hasOutbound,
-      deletedBanned: !!(item.criteria.isDeleted || item.criteria.isBanned),
-      blocking: !!(item.criteria.isBlocking || item.criteria.isBlocked),
-      lowFollowers: item.criteria.followersCount < state.params.lowFollowersThreshold,
-      noisy: isUserNoisy(item),
-      muted: !!item.criteria.isMuted,
-      massFollower: isUserMassFollower(item),
-      spammyRatio: !!item.criteria.isSpammyRatio,
-      flagged: !!item.criteria.isFlagged,
-      outlier: !!item.criteria.isOutlier
-    };
+      const criteriaMatches = {
+        notFollowing: !item.criteria.isFollowingUser,
+        inactive: item.dynamicInactive,
+        noInbound: !hasInbound,
+        noOutbound: !hasOutbound,
+        deletedBanned: !!(item.criteria.isDeleted || item.criteria.isBanned),
+        blocking: !!(item.criteria.isBlocking || item.criteria.isBlocked),
+        lowFollowers: item.criteria.followersCount < state.params.lowFollowersThreshold,
+        noisy: isUserNoisy(item),
+        muted: !!item.criteria.isMuted,
+        massFollower: isUserMassFollower(item),
+        spammyRatio: !!item.criteria.isSpammyRatio,
+        flagged: !!item.criteria.isFlagged,
+        outlier: !!item.criteria.isOutlier,
+      };
 
-    // Account has "OK" status if it has none of the warning/inactive flags
-    const isOk = !criteriaMatches.notFollowing && 
-                 !criteriaMatches.inactive && 
-                 !criteriaMatches.noInbound && 
-                 !criteriaMatches.noOutbound && 
-                 !criteriaMatches.deletedBanned && 
-                 !criteriaMatches.blocking && 
-                 !criteriaMatches.lowFollowers &&
-                 !criteriaMatches.noisy &&
-                 !criteriaMatches.muted &&
-                 !criteriaMatches.massFollower &&
-                 !criteriaMatches.spammyRatio &&
-                 !criteriaMatches.flagged &&
-                 !criteriaMatches.outlier;
+      // Account has "OK" status if it has none of the warning/inactive flags
+      const isOk =
+        !criteriaMatches.notFollowing &&
+        !criteriaMatches.inactive &&
+        !criteriaMatches.noInbound &&
+        !criteriaMatches.noOutbound &&
+        !criteriaMatches.deletedBanned &&
+        !criteriaMatches.blocking &&
+        !criteriaMatches.lowFollowers &&
+        !criteriaMatches.noisy &&
+        !criteriaMatches.muted &&
+        !criteriaMatches.massFollower &&
+        !criteriaMatches.spammyRatio &&
+        !criteriaMatches.flagged &&
+        !criteriaMatches.outlier;
 
-    // OR Filter check: The item is shown if it matches at least one checked criterion
-    let matchesFilter = false;
+      // OR Filter check: The item is shown if it matches at least one checked criterion
+      let matchesFilter = false;
 
-    if (isOk && state.filters.ok) matchesFilter = true;
-    if (criteriaMatches.notFollowing && state.filters.notFollowing) matchesFilter = true;
-    if (criteriaMatches.inactive && state.filters.inactive) matchesFilter = true;
-    if (criteriaMatches.noInbound && state.filters.noInbound) matchesFilter = true;
-    if (criteriaMatches.noOutbound && state.filters.noOutbound) matchesFilter = true;
-    if (criteriaMatches.deletedBanned && state.filters.deletedBanned) matchesFilter = true;
-    if (criteriaMatches.blocking && state.filters.blocking) matchesFilter = true;
-    if (criteriaMatches.lowFollowers && state.filters.lowFollowers) matchesFilter = true;
-    if (criteriaMatches.noisy && state.filters.noisy) matchesFilter = true;
-    if (criteriaMatches.muted && state.filters.muted) matchesFilter = true;
-    if (criteriaMatches.massFollower && state.filters.massFollower) matchesFilter = true;
-    if (criteriaMatches.spammyRatio && state.filters.spammyRatio) matchesFilter = true;
-    if (criteriaMatches.flagged && state.filters.flagged) matchesFilter = true;
-    if (criteriaMatches.outlier && state.filters.outlier) matchesFilter = true;
+      if (isOk && state.filters.ok) matchesFilter = true;
+      if (criteriaMatches.notFollowing && state.filters.notFollowing) matchesFilter = true;
+      if (criteriaMatches.inactive && state.filters.inactive) matchesFilter = true;
+      if (criteriaMatches.noInbound && state.filters.noInbound) matchesFilter = true;
+      if (criteriaMatches.noOutbound && state.filters.noOutbound) matchesFilter = true;
+      if (criteriaMatches.deletedBanned && state.filters.deletedBanned) matchesFilter = true;
+      if (criteriaMatches.blocking && state.filters.blocking) matchesFilter = true;
+      if (criteriaMatches.lowFollowers && state.filters.lowFollowers) matchesFilter = true;
+      if (criteriaMatches.noisy && state.filters.noisy) matchesFilter = true;
+      if (criteriaMatches.muted && state.filters.muted) matchesFilter = true;
+      if (criteriaMatches.massFollower && state.filters.massFollower) matchesFilter = true;
+      if (criteriaMatches.spammyRatio && state.filters.spammyRatio) matchesFilter = true;
+      if (criteriaMatches.flagged && state.filters.flagged) matchesFilter = true;
+      if (criteriaMatches.outlier && state.filters.outlier) matchesFilter = true;
 
-    return matchesFilter;
-  }).sort((a, b) => {
-    let valA, valB;
-    if (state.sorting.col === 'followers') {
-      valA = a.criteria.followersCount;
-      valB = b.criteria.followersCount;
-    } else if (state.sorting.col === 'lastPost') {
-      valA = a.criteria.lastPostDate ? new Date(a.criteria.lastPostDate).getTime() : 0;
-      valB = b.criteria.lastPostDate ? new Date(b.criteria.lastPostDate).getTime() : 0;
-    } else if (state.sorting.col === 'lastInteraction') {
-      const dateA = a.criteria.lastInteraction?.date || a.criteria.lastLikeDate;
-      const dateB = b.criteria.lastInteraction?.date || b.criteria.lastLikeDate;
-      valA = dateA ? new Date(dateA).getTime() : 0;
-      valB = dateB ? new Date(dateB).getTime() : 0;
-    } else if (state.sorting.col === 'score') {
-      valA = a.score;
-      valB = b.score;
-    }
+      return matchesFilter;
+    })
+    .sort((a, b) => {
+      let valA, valB;
+      if (state.sorting.col === 'followers') {
+        valA = a.criteria.followersCount;
+        valB = b.criteria.followersCount;
+      } else if (state.sorting.col === 'lastPost') {
+        valA = a.criteria.lastPostDate ? new Date(a.criteria.lastPostDate).getTime() : 0;
+        valB = b.criteria.lastPostDate ? new Date(b.criteria.lastPostDate).getTime() : 0;
+      } else if (state.sorting.col === 'lastInteraction') {
+        const dateA = a.criteria.lastInteraction?.date || a.criteria.lastLikeDate;
+        const dateB = b.criteria.lastInteraction?.date || b.criteria.lastLikeDate;
+        valA = dateA ? new Date(dateA).getTime() : 0;
+        valB = dateB ? new Date(dateB).getTime() : 0;
+      } else if (state.sorting.col === 'score') {
+        valA = a.score;
+        valB = b.score;
+      }
 
-    if (valA < valB) return state.sorting.order === 'asc' ? -1 : 1;
-    if (valA > valB) return state.sorting.order === 'asc' ? 1 : -1;
-    return 0;
-  });
+      if (valA < valB) return state.sorting.order === 'asc' ? -1 : 1;
+      if (valA > valB) return state.sorting.order === 'asc' ? 1 : -1;
+      return 0;
+    });
 }
 
 // --- Render Operations ---
@@ -731,38 +759,43 @@ function renderDashboard(resetSelection = true) {
 
   // Render Table rows
   tableBody.innerHTML = '';
-  
+
   if (pageItems.length === 0) {
     emptyState.classList.remove('hidden');
   } else {
     emptyState.classList.add('hidden');
-    pageItems.forEach(item => {
+    pageItems.forEach((item) => {
       const row = document.createElement('tr');
       row.className = state.selectedDids.has(item.did) ? 'selected-row' : '';
 
       // Build criteria badges (shortened with descriptive titles to save screen space)
       let badgesHTML = '';
       if (item.criteria.isDeleted) {
-        badgesHTML += '<span class="badge badge-danger" title="This account has been deleted or deactivated">DELETED</span>';
+        badgesHTML +=
+          '<span class="badge badge-danger" title="This account has been deleted or deactivated">DELETED</span>';
       }
       if (item.criteria.isBanned) {
-        badgesHTML += '<span class="badge badge-danger" title="This account has been suspended or flagged by Bluesky">BANNED</span>';
+        badgesHTML +=
+          '<span class="badge badge-danger" title="This account has been suspended or flagged by Bluesky">BANNED</span>';
       }
       if (item.criteria.isBlocking || item.criteria.isBlocked) {
-        badgesHTML += '<span class="badge badge-danger" title="This account is blocking you or blocked by you">BLOCK</span>';
+        badgesHTML +=
+          '<span class="badge badge-danger" title="This account is blocking you or blocked by you">BLOCK</span>';
       }
       if (item.dynamicInactive) {
         badgesHTML += `<span class="badge badge-warning" title="Inactive: has not posted in the last ${state.params.inactiveDays} days">INACTIVE</span>`;
       }
       if (!item.criteria.isFollowingUser) {
-        badgesHTML += '<span class="badge badge-secondary" title="This account does not follow you back">NO FOLLOW</span>';
+        badgesHTML +=
+          '<span class="badge badge-secondary" title="This account does not follow you back">NO FOLLOW</span>';
       }
-      
-      const hasInbound = item.criteria.hasLikedUser || 
-                         item.criteria.hasRepostedUser || 
-                         item.criteria.hasRepliedToUser || 
-                         item.criteria.hasMessagedUser || 
-                         item.criteria.userInteracted;
+
+      const hasInbound =
+        item.criteria.hasLikedUser ||
+        item.criteria.hasRepostedUser ||
+        item.criteria.hasRepliedToUser ||
+        item.criteria.hasMessagedUser ||
+        item.criteria.userInteracted;
       const hasOutbound = item.criteria.userContactedThem;
 
       let warningsCount = 0;
@@ -772,55 +805,68 @@ function renderDashboard(resetSelection = true) {
       if (!item.criteria.isFollowingUser) warningsCount++;
 
       if (!hasInbound) {
-        badgesHTML += '<span class="badge badge-secondary" title="They have not liked, replied, or messaged you recently (scanned last 1,000 notifications)">NO INBOUND</span>';
+        badgesHTML +=
+          '<span class="badge badge-secondary" title="They have not liked, replied, or messaged you recently (scanned last 1,000 notifications)">NO INBOUND</span>';
         warningsCount++;
       } else {
-        badgesHTML += '<span class="badge badge-success" title="They liked, replied, or messaged you recently (scanned last 1,000 notifications)">THEY CONTACTED</span>';
+        badgesHTML +=
+          '<span class="badge badge-success" title="They liked, replied, or messaged you recently (scanned last 1,000 notifications)">THEY CONTACTED</span>';
       }
 
       if (!hasOutbound) {
-        badgesHTML += '<span class="badge badge-secondary" title="You have not liked, replied, or reposted them recently (scanned last 1,000 activities)">NO OUTBOUND</span>';
+        badgesHTML +=
+          '<span class="badge badge-secondary" title="You have not liked, replied, or reposted them recently (scanned last 1,000 activities)">NO OUTBOUND</span>';
         warningsCount++;
       } else {
-        badgesHTML += '<span class="badge badge-success" title="You liked, replied, or reposted them recently (scanned last 1,000 activities)">I CONTACTED</span>';
+        badgesHTML +=
+          '<span class="badge badge-success" title="You liked, replied, or reposted them recently (scanned last 1,000 activities)">I CONTACTED</span>';
       }
 
       if (isUserNoisy(item)) {
-        const countStr = item.criteria.postsCount7Days !== undefined ? `${item.criteria.postsCount7Days}` : '10+';
+        const countStr =
+          item.criteria.postsCount7Days !== undefined ? `${item.criteria.postsCount7Days}` : '10+';
         badgesHTML += `<span class="badge badge-warning" title="Noisy Poster: Writes high frequency of posts/reposts (${countStr} in last 7 days)">NOISY</span>`;
         warningsCount++;
       }
 
       if (item.criteria.isMuted) {
-        badgesHTML += '<span class="badge badge-danger" title="Muted: This account is currently muted by you on Bluesky">MUTED</span>';
+        badgesHTML +=
+          '<span class="badge badge-danger" title="Muted: This account is currently muted by you on Bluesky">MUTED</span>';
         warningsCount++;
       }
 
       if (isUserMassFollower(item)) {
-        const followsCountStr = item.criteria.followsCount !== undefined ? `${item.criteria.followsCount.toLocaleString()}` : '3,500+';
+        const followsCountStr =
+          item.criteria.followsCount !== undefined
+            ? `${item.criteria.followsCount.toLocaleString()}`
+            : '3,500+';
         badgesHTML += `<span class="badge badge-warning" title="Mass Follower: Follows ${followsCountStr} accounts on Bluesky">MASS FOLLOW</span>`;
         warningsCount++;
       }
 
       if (item.criteria.isSpammyRatio) {
-        badgesHTML += '<span class="badge badge-danger" title="Spammy Ratio: Following count is significantly higher than followers count (follow-back farmer)">SPAMMY RATIO</span>';
+        badgesHTML +=
+          '<span class="badge badge-danger" title="Spammy Ratio: Following count is significantly higher than followers count (follow-back farmer)">SPAMMY RATIO</span>';
         warningsCount++;
       }
 
       if (item.criteria.isFlagged) {
-        badgesHTML += '<span class="badge badge-danger" title="Flagged: This account has moderation flags or labels from Bluesky Moderation">FLAGGED</span>';
+        badgesHTML +=
+          '<span class="badge badge-danger" title="Flagged: This account has moderation flags or labels from Bluesky Moderation">FLAGGED</span>';
         warningsCount++;
       }
 
       if (item.criteria.isOutlier) {
-        badgesHTML += '<span class="badge badge-warning" title="Social Outlier: Has 0 mutual follows in common with you on Bluesky">0 MUTUALS</span>';
+        badgesHTML +=
+          '<span class="badge badge-warning" title="Social Outlier: Has 0 mutual follows in common with you on Bluesky">0 MUTUALS</span>';
         warningsCount++;
       } else if (item.criteria.mutualsCount > 0) {
         badgesHTML += `<span class="badge badge-success" title="Mutual Social Graph: Has ${item.criteria.mutualsCount} mutual follows in common with you on Bluesky">${item.criteria.mutualsCount} MUTUALS</span>`;
       }
 
       if (warningsCount === 0) {
-        badgesHTML = '<span class="badge badge-success" title="Meets all positive criteria checks">OK</span>';
+        badgesHTML =
+          '<span class="badge badge-success" title="Meets all positive criteria checks">OK</span>';
       }
 
       // Score color class (0-5 scale: high score represents strong reason to unfollow)
@@ -828,7 +874,9 @@ function renderDashboard(resetSelection = true) {
       if (item.score >= 4) scoreClass = 'score-low';
       else if (item.score >= 2) scoreClass = 'score-mid';
 
-      const avatarSrc = item.avatar || 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'36\' height=\'36\' viewBox=\'0 0 24 24\' fill=\'%23cbd5e1\'><circle cx=\'12\' cy=\'12\' r=\'12\'/></svg>';
+      const avatarSrc =
+        item.avatar ||
+        "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 24 24' fill='%23cbd5e1'><circle cx='12' cy='12' r='12'/></svg>";
 
       const isUnfollowed = !item.followingUri;
       if (isUnfollowed) {
@@ -839,7 +887,7 @@ function renderDashboard(resetSelection = true) {
 
       const isLowFollowers = item.criteria.followersCount < state.params.lowFollowersThreshold;
       const isPostInactive = item.dynamicInactive;
-      
+
       let isInteractionInactive = true;
       const lastInteractionDate = item.criteria.lastInteraction?.date || item.criteria.lastLikeDate;
       if (lastInteractionDate) {
@@ -852,7 +900,7 @@ function renderDashboard(resetSelection = true) {
       const interactionInfo = item.criteria.lastInteraction;
       const renderDate = interactionInfo?.date || item.criteria.lastLikeDate;
       const relativeDateStr = formatRelativeDate(renderDate);
-      
+
       let cellContentHTML = relativeDateStr;
       if (renderDate && relativeDateStr !== 'Never') {
         let typeLabel = '';
@@ -861,11 +909,11 @@ function renderDashboard(resetSelection = true) {
             like: 'Like',
             reply: 'Reply',
             repost: 'Repost',
-            message: 'DM'
+            message: 'DM',
           };
           typeLabel = ` (${typeMap[interactionInfo.type] || interactionInfo.type})`;
         }
-        
+
         const linkUrl = interactionInfo?.link;
         if (linkUrl) {
           cellContentHTML = `<a href="${linkUrl}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline; text-underline-offset: 2px;" title="View last ${interactionInfo.type} on Bluesky">${relativeDateStr}${typeLabel}</a>`;
@@ -879,9 +927,13 @@ function renderDashboard(resetSelection = true) {
 
       row.innerHTML = `
         <td class="col-checkbox">
-          ${isUnfollowed ? '<span class="text-muted text-center" style="display: block; opacity: 0.5;">—</span>' : `
+          ${
+            isUnfollowed
+              ? '<span class="text-muted text-center" style="display: block; opacity: 0.5;">—</span>'
+              : `
             <input type="checkbox" class="row-checkbox" data-did="${item.did}" ${state.selectedDids.has(item.did) ? 'checked' : ''}>
-          `}
+          `
+          }
         </td>
         <td>
           <div class="profile-cell" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">
@@ -902,11 +954,15 @@ function renderDashboard(resetSelection = true) {
         </td>
         <td class="score-cell ${scoreClass}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${item.score}</td>
         <td class="text-right">
-          ${isUnfollowed ? `
+          ${
+            isUnfollowed
+              ? `
             <button class="btn btn-primary btn-sm refollow-single-btn" data-did="${item.did}" data-handle="${item.handle}">Re-follow</button>
-          ` : `
+          `
+              : `
             <button class="btn btn-secondary btn-sm unfollow-single-btn" data-did="${item.did}" data-handle="${item.handle}">Unfollow</button>
-          `}
+          `
+          }
         </td>
       `;
 
@@ -938,7 +994,7 @@ function renderDashboard(resetSelection = true) {
   }
 
   // Render sorting indicators on headers
-  document.querySelectorAll('.sortable').forEach(th => {
+  document.querySelectorAll('.sortable').forEach((th) => {
     th.classList.remove('sort-asc', 'sort-desc');
     const sortCol = th.dataset.sort;
     if (state.sorting.col === sortCol) {
@@ -947,7 +1003,7 @@ function renderDashboard(resetSelection = true) {
   });
 
   // Render Pagination Info (Concurrently for top & bottom)
-  paginationInfos.forEach(el => {
+  paginationInfos.forEach((el) => {
     if (totalCount === 0) {
       el.textContent = 'Showing 0 accounts';
     } else {
@@ -956,7 +1012,7 @@ function renderDashboard(resetSelection = true) {
   });
 
   // Page Numbers (Concurrently for top & bottom)
-  paginationPagesList.forEach(container => {
+  paginationPagesList.forEach((container) => {
     container.innerHTML = '';
     const maxPagesToShow = 5;
     let startPage = Math.max(1, state.pagination.currentPage - 2);
@@ -978,11 +1034,11 @@ function renderDashboard(resetSelection = true) {
     }
   });
 
-  prevPageBtns.forEach(btn => {
+  prevPageBtns.forEach((btn) => {
     btn.disabled = state.pagination.currentPage === 1;
   });
 
-  nextPageBtns.forEach(btn => {
+  nextPageBtns.forEach((btn) => {
     btn.disabled = state.pagination.currentPage === totalPages || totalPages === 0;
   });
 
@@ -997,7 +1053,7 @@ function renderCheckboxHeaders(pageItems) {
     return;
   }
   selectAllCheckbox.disabled = false;
-  const allPageDidsSelected = pageItems.every(item => state.selectedDids.has(item.did));
+  const allPageDidsSelected = pageItems.every((item) => state.selectedDids.has(item.did));
   selectAllCheckbox.checked = allPageDidsSelected;
 }
 
@@ -1008,9 +1064,9 @@ function handleSelectAllToggle(e) {
   const pageItems = list.slice(startIdx, endIdx);
 
   if (e.target.checked) {
-    pageItems.forEach(item => state.selectedDids.add(item.did));
+    pageItems.forEach((item) => state.selectedDids.add(item.did));
   } else {
-    pageItems.forEach(item => state.selectedDids.delete(item.did));
+    pageItems.forEach((item) => state.selectedDids.delete(item.did));
   }
   renderDashboard(false);
 }
@@ -1041,18 +1097,18 @@ async function executeUnfollow(dids, buttonEl) {
 
   try {
     const data = await batchUnfollow(state.agent, state.user.did, dids, onSyncUpdate);
-    
+
     // Mark successfully unfollowed DIDs as unfollowed in raw state list
     const successes = data.success || [];
-    successes.forEach(did => {
-      const f = state.followings.find(item => item.did === did);
+    successes.forEach((did) => {
+      const f = state.followings.find((item) => item.did === did);
       if (f) {
         f.followingUri = null;
       }
     });
-    
+
     // Clear selections
-    successes.forEach(did => state.selectedDids.delete(did));
+    successes.forEach((did) => state.selectedDids.delete(did));
 
     renderDashboard(false); // Re-render without resetting selection
   } catch (err) {
@@ -1075,7 +1131,7 @@ async function handleRefollow(did, handle, buttonEl) {
     const data = await followUser(state.agent, state.user.did, did, onSyncUpdate);
 
     // Update in-memory following object's URI
-    const f = state.followings.find(item => item.did === did);
+    const f = state.followings.find((item) => item.did === did);
     if (f) {
       f.followingUri = data.followingUri;
     }
@@ -1135,7 +1191,7 @@ async function handleCancelSync() {
   try {
     await syncCache.set(state.user.did, {
       status: 'cancelled',
-      error: 'Synchronization aborted by user.'
+      error: 'Synchronization aborted by user.',
     });
     showSyncCancelled('Synchronization aborted by user.');
   } catch (err) {
@@ -1155,7 +1211,7 @@ async function handleRetrySync() {
 
 function updateSyncProgressUI(syncState) {
   syncStage.textContent = syncState.progress.currentStage || 'Syncing...';
-  
+
   let percent = 0;
   if (syncState.progress.total > 0) {
     percent = Math.round((syncState.progress.processed / syncState.progress.total) * 100);
@@ -1164,7 +1220,7 @@ function updateSyncProgressUI(syncState) {
   } else if (syncState.status === 'enriching') {
     percent = 50; // Dummy baseline
   }
-  
+
   syncProgressBar.style.width = `${percent}%`;
   syncPercent.textContent = `${percent}%`;
 }
@@ -1182,21 +1238,23 @@ function formatRelativeDate(dateStr) {
   }
   if (diffDays === 1) return 'Yesterday';
   if (diffDays < 30) return `${diffDays}d ago`;
-  
+
   const date = new Date(dateStr);
   return date.toLocaleDateString(undefined, { year: '2-digit', month: 'short', day: 'numeric' });
 }
 
 function escapeHTML(str) {
   if (!str) return '';
-  return str.replace(/[&<>'"]/g, 
-    tag => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      "'": '&#39;',
-      '"': '&quot;'
-    }[tag] || tag)
+  return str.replace(
+    /[&<>'"]/g,
+    (tag) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        "'": '&#39;',
+        '"': '&quot;',
+      })[tag] || tag,
   );
 }
 
@@ -1210,10 +1268,13 @@ function truncateText(text, maxLength) {
 function formatLastSynced(timestamp) {
   if (!timestamp) return 'Never synced';
   const date = new Date(timestamp);
-  return 'Last synced: ' + date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  });
+  return (
+    'Last synced: ' +
+    date.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+  );
 }

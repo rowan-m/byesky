@@ -3,13 +3,24 @@ import { Agent } from '@atproto/api';
 import { syncCache } from './cache.js';
 
 // Simple sleep helper
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Helper to identify severe moderation flags / actions
 const SEVERE_LABELS = new Set([
-  'spam', 'impersonation', 'scam', 'deceptive', 'misleading',
-  'harassment', 'hate', 'intolerance', 'threat', 'rude',
-  'abuse', 'violation', 'banned', 'suspended'
+  'spam',
+  'impersonation',
+  'scam',
+  'deceptive',
+  'misleading',
+  'harassment',
+  'hate',
+  'intolerance',
+  'threat',
+  'rude',
+  'abuse',
+  'violation',
+  'banned',
+  'suspended',
 ]);
 
 function isSevereLabel(labelVal) {
@@ -51,7 +62,7 @@ export function initOAuthClient() {
     const clientId = `http://localhost?redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent('atproto transition:generic repo:app.bsky.graph.follow')}`;
     oauthClient = new BrowserOAuthClient({
       handleResolver: 'https://bsky.social',
-      clientMetadata: atprotoLoopbackClientMetadata(clientId)
+      clientMetadata: atprotoLoopbackClientMetadata(clientId),
     });
   } else {
     oauthClient = new BrowserOAuthClient({
@@ -66,8 +77,8 @@ export function initOAuthClient() {
         response_types: ['code'],
         token_endpoint_auth_method: 'none',
         application_type: 'web',
-        dpop_bound_access_tokens: true
-      }
+        dpop_bound_access_tokens: true,
+      },
     });
   }
 
@@ -86,11 +97,11 @@ export function startBackgroundSync(agent, userDid, onUpdate) {
       console.log(`Sync background thread gracefully aborted due to cancellation for ${userDid}`);
       return;
     }
-    
+
     console.error('Fatal sync error:', err);
     await syncCache.set(userDid, {
       status: 'error',
-      error: err.message || 'An unexpected error occurred during analysis.'
+      error: err.message || 'An unexpected error occurred during analysis.',
     });
     if (onUpdate) onUpdate();
   });
@@ -115,22 +126,24 @@ async function fetchWithBackoff(userDid, apiCallFn, onUpdate) {
       return await apiCallFn();
     } catch (err) {
       if (err.status === 429) {
-        console.warn(`Rate limit hit (429) for ${userDid}. Pausing for ${backoffMs}ms before retry...`);
-        
+        console.warn(
+          `Rate limit hit (429) for ${userDid}. Pausing for ${backoffMs}ms before retry...`,
+        );
+
         // Push visual warnings to the UI
         const seconds = Math.round(backoffMs / 1000);
         await syncCache.updateProgress(
           userDid,
           undefined,
           undefined,
-          `Rate limit hit! Pausing for ${seconds}s to avoid blocks...`
+          `Rate limit hit! Pausing for ${seconds}s to avoid blocks...`,
         );
         // Save state and notify UI
         await syncCache.set(userDid, {});
         if (onUpdate) onUpdate();
 
         await sleep(backoffMs);
-        
+
         // Increment backoff exponentially
         backoffMs = Math.min(maxBackoff, backoffMs * 1.5);
         continue; // Retry the request
@@ -155,7 +168,7 @@ async function runSync(agent, userDid, onUpdate) {
   // while satisfying Authentication Required checks.
   const appViewAgent = new Agent({
     service: 'https://api.bsky.app',
-    session: agent.sessionManager
+    session: agent.sessionManager,
   });
 
   const syncSessionId = Math.random().toString(36).substring(2, 10);
@@ -180,7 +193,7 @@ async function runSync(agent, userDid, onUpdate) {
     syncSessionId: syncSessionId,
     error: null,
     followings: [],
-    lastUpdated: Date.now()
+    lastUpdated: Date.now(),
   });
   await syncCache.updateProgress(userDid, 0, 0, 'Retrieving follows list from Bluesky...');
   if (onUpdate) onUpdate();
@@ -189,18 +202,28 @@ async function runSync(agent, userDid, onUpdate) {
   let cursor;
   try {
     do {
-      const response = await fetchWithBackoff(userDid, () => pdsAgent.api.app.bsky.graph.getFollows({
-        actor: userDid,
-        cursor,
-        limit: 100
-      }), onUpdate);
+      const response = await fetchWithBackoff(
+        userDid,
+        () =>
+          pdsAgent.api.app.bsky.graph.getFollows({
+            actor: userDid,
+            cursor,
+            limit: 100,
+          }),
+        onUpdate,
+      );
 
       const check = await syncCache.get(userDid);
       if (check.syncSessionId !== syncSessionId) return;
 
       follows = follows.concat(response.data.follows || []);
       cursor = response.data.cursor;
-      await syncCache.updateProgress(userDid, follows.length, 0, `Retrieved ${follows.length} followings...`);
+      await syncCache.updateProgress(
+        userDid,
+        follows.length,
+        0,
+        `Retrieved ${follows.length} followings...`,
+      );
       if (onUpdate) onUpdate();
     } while (cursor);
   } catch (err) {
@@ -208,7 +231,7 @@ async function runSync(agent, userDid, onUpdate) {
     console.error('Error fetching follows:', err);
     await syncCache.set(userDid, {
       status: 'error',
-      error: 'Failed to retrieve follow list: ' + err.message
+      error: 'Failed to retrieve follow list: ' + err.message,
     });
     if (onUpdate) onUpdate();
     return;
@@ -218,7 +241,7 @@ async function runSync(agent, userDid, onUpdate) {
   if (totalFollows === 0) {
     await syncCache.set(userDid, {
       status: 'completed',
-      followings: []
+      followings: [],
     });
     await syncCache.updateProgress(userDid, 0, 0, 'No followings found.');
     if (onUpdate) onUpdate();
@@ -233,7 +256,7 @@ async function runSync(agent, userDid, onUpdate) {
   if (onUpdate) onUpdate();
 
   // Build basic following objects from graph follows
-  const followingsList = follows.map(f => {
+  const followingsList = follows.map((f) => {
     return {
       did: f.did,
       handle: f.handle,
@@ -266,15 +289,15 @@ async function runSync(agent, userDid, onUpdate) {
         lastInteraction: null,
         followersCount: 0,
         followsCount: 0,
-        postsCount: 0
+        postsCount: 0,
       },
-      score: 0
+      score: 0,
     };
   });
 
   await syncCache.set(userDid, {
     status: 'enriching',
-    followings: followingsList
+    followings: followingsList,
   });
   if (onUpdate) onUpdate();
 
@@ -284,10 +307,15 @@ async function runSync(agent, userDid, onUpdate) {
     repostedBy: new Set(),
     repliedBy: new Set(),
     messagedBy: new Set(),
-    userInteractedWith: new Set()
+    userInteractedWith: new Set(),
   };
 
-  await syncCache.updateProgress(userDid, 0, totalFollows, 'Fetching interaction history (notifications & DMs)...');
+  await syncCache.updateProgress(
+    userDid,
+    0,
+    totalFollows,
+    'Fetching interaction history (notifications & DMs)...',
+  );
   if (onUpdate) onUpdate();
 
   try {
@@ -296,10 +324,15 @@ async function runSync(agent, userDid, onUpdate) {
     const maxNotificationsToScan = 1000;
 
     do {
-      const response = await fetchWithBackoff(userDid, () => agent.api.app.bsky.notification.listNotifications({ 
-        limit: 100, 
-        cursor 
-      }), onUpdate);
+      const response = await fetchWithBackoff(
+        userDid,
+        () =>
+          agent.api.app.bsky.notification.listNotifications({
+            limit: 100,
+            cursor,
+          }),
+        onUpdate,
+      );
 
       const notifsList = response.data.notifications || [];
       if (notifsList.length === 0) break;
@@ -326,9 +359,7 @@ async function runSync(agent, userDid, onUpdate) {
       const progressMessage = `Fetching interaction history (notifications ${fetchedCount}/${maxNotificationsToScan})...`;
       await syncCache.updateProgress(userDid, 0, totalFollows, progressMessage);
       if (onUpdate) onUpdate();
-
     } while (cursor && fetchedCount < maxNotificationsToScan);
-
   } catch (err) {
     if (err.message === 'Sync cancelled') return;
     console.warn('Could not fetch notifications for interactions:', err);
@@ -336,7 +367,11 @@ async function runSync(agent, userDid, onUpdate) {
 
   try {
     if (agent.api.chat && agent.api.chat.bsky && agent.api.chat.bsky.convo) {
-      const convos = await fetchWithBackoff(userDid, () => agent.api.chat.bsky.convo.listConvos({ limit: 50 }), onUpdate);
+      const convos = await fetchWithBackoff(
+        userDid,
+        () => agent.api.chat.bsky.convo.listConvos({ limit: 50 }),
+        onUpdate,
+      );
       if (convos.data && convos.data.convos) {
         for (const convo of convos.data.convos) {
           if (!convo.members) continue;
@@ -345,10 +380,15 @@ async function runSync(agent, userDid, onUpdate) {
               interactions.messagedBy.add(member.did);
               interactions.userInteractedWith.add(member.did);
               userOutboundInteractions.add(member.did);
-              
+
               const msgDate = convo.lastMessage?.sentAt;
               if (msgDate) {
-                updateInteraction(member.did, msgDate, 'message', `https://bsky.app/messages/convo/${convo.id}`);
+                updateInteraction(
+                  member.did,
+                  msgDate,
+                  'message',
+                  `https://bsky.app/messages/convo/${convo.id}`,
+                );
               }
             }
           }
@@ -360,7 +400,12 @@ async function runSync(agent, userDid, onUpdate) {
     console.warn('Could not fetch chat conversations:', err);
   }
 
-  await syncCache.updateProgress(userDid, 0, totalFollows, 'Mapping your outbound feed interactions (replies & reposts)...');
+  await syncCache.updateProgress(
+    userDid,
+    0,
+    totalFollows,
+    'Mapping your outbound feed interactions (replies & reposts)...',
+  );
   if (onUpdate) onUpdate();
 
   // 1. Scan your own author feed (up to 1,000 items)
@@ -370,11 +415,16 @@ async function runSync(agent, userDid, onUpdate) {
     const maxFeedToScan = 1000;
 
     do {
-      const response = await fetchWithBackoff(userDid, () => appViewAgent.api.app.bsky.feed.getAuthorFeed({
-        actor: userDid,
-        limit: 100,
-        cursor: feedCursor
-      }), onUpdate);
+      const response = await fetchWithBackoff(
+        userDid,
+        () =>
+          appViewAgent.api.app.bsky.feed.getAuthorFeed({
+            actor: userDid,
+            limit: 100,
+            cursor: feedCursor,
+          }),
+        onUpdate,
+      );
 
       const feedList = response.data.feed || [];
       if (feedList.length === 0) break;
@@ -385,7 +435,7 @@ async function runSync(agent, userDid, onUpdate) {
           const rootDid = item.reply.root?.author?.did;
           const replyDate = item.post.indexedAt || item.post.record?.createdAt;
           const postLink = atUriToBskyUrl(item.post.uri);
-          
+
           if (parentDid && parentDid !== userDid) {
             userOutboundInteractions.add(parentDid);
             if (replyDate) updateInteraction(parentDid, replyDate, 'reply', postLink);
@@ -397,10 +447,12 @@ async function runSync(agent, userDid, onUpdate) {
         }
         if (item.reason && item.reason.$type?.includes('reasonRepost')) {
           const authorDid = item.post?.author?.did;
-          const repostDate = item.reason.indexedAt || item.post.indexedAt || item.post.record?.createdAt;
+          const repostDate =
+            item.reason.indexedAt || item.post.indexedAt || item.post.record?.createdAt;
           if (authorDid && authorDid !== userDid) {
             userOutboundInteractions.add(authorDid);
-            if (repostDate) updateInteraction(authorDid, repostDate, 'repost', atUriToBskyUrl(item.post.uri));
+            if (repostDate)
+              updateInteraction(authorDid, repostDate, 'repost', atUriToBskyUrl(item.post.uri));
           }
         }
       }
@@ -411,9 +463,7 @@ async function runSync(agent, userDid, onUpdate) {
       const progressMessage = `Mapping your outbound feed interactions (${feedFetched}/${maxFeedToScan})...`;
       await syncCache.updateProgress(userDid, 0, totalFollows, progressMessage);
       if (onUpdate) onUpdate();
-
     } while (feedCursor && feedFetched < maxFeedToScan);
-
   } catch (err) {
     if (err.message === 'Sync cancelled') return;
     console.warn('Could not fetch outbound feed for interactions:', err);
@@ -425,16 +475,26 @@ async function runSync(agent, userDid, onUpdate) {
     let likesFetched = 0;
     const maxLikesToScan = 1000;
 
-    await syncCache.updateProgress(userDid, 0, totalFollows, 'Mapping your outbound liked posts...');
+    await syncCache.updateProgress(
+      userDid,
+      0,
+      totalFollows,
+      'Mapping your outbound liked posts...',
+    );
     if (onUpdate) onUpdate();
 
     do {
-      const response = await fetchWithBackoff(userDid, () => agent.api.com.atproto.repo.listRecords({
-        repo: userDid,
-        collection: 'app.bsky.feed.like',
-        limit: 100,
-        cursor: likesCursor
-      }), onUpdate);
+      const response = await fetchWithBackoff(
+        userDid,
+        () =>
+          agent.api.com.atproto.repo.listRecords({
+            repo: userDid,
+            collection: 'app.bsky.feed.like',
+            limit: 100,
+            cursor: likesCursor,
+          }),
+        onUpdate,
+      );
 
       const records = response.data.records || [];
       if (records.length === 0) break;
@@ -463,9 +523,7 @@ async function runSync(agent, userDid, onUpdate) {
       const progressMessage = `Mapping your outbound liked posts (${likesFetched}/${maxLikesToScan})...`;
       await syncCache.updateProgress(userDid, 0, totalFollows, progressMessage);
       if (onUpdate) onUpdate();
-
     } while (likesCursor && likesFetched < maxLikesToScan);
-
   } catch (err) {
     if (err.message === 'Sync cancelled') return;
     console.warn('Could not fetch outbound likes for interactions:', err);
@@ -502,8 +560,8 @@ async function runSync(agent, userDid, onUpdate) {
       repliedBy: Array.from(interactions.repliedBy),
       messagedBy: Array.from(interactions.messagedBy),
       userInteractedWith: Array.from(interactions.userInteractedWith),
-      userOutboundInteractions: Array.from(userOutboundInteractions)
-    }
+      userOutboundInteractions: Array.from(userOutboundInteractions),
+    },
   });
   if (onUpdate) onUpdate();
 
@@ -512,18 +570,28 @@ async function runSync(agent, userDid, onUpdate) {
   for (let i = 0; i < followingsList.length; i += batchSize) {
     // Check for cancellation or newer session takeover
     const cancelCheckLoop = await syncCache.get(userDid);
-    if (cancelCheckLoop.status === 'cancelled' || cancelCheckLoop.syncSessionId !== syncSessionId) return;
+    if (cancelCheckLoop.status === 'cancelled' || cancelCheckLoop.syncSessionId !== syncSessionId)
+      return;
 
     const batch = followingsList.slice(i, i + batchSize);
-    const batchDids = batch.map(b => b.did);
+    const batchDids = batch.map((b) => b.did);
 
-    await syncCache.updateProgress(userDid, i, totalFollows, `Fetching profile statistics (${i}/${totalFollows})...`);
+    await syncCache.updateProgress(
+      userDid,
+      i,
+      totalFollows,
+      `Fetching profile statistics (${i}/${totalFollows})...`,
+    );
     if (onUpdate) onUpdate();
 
     try {
-      const profilesRes = await fetchWithBackoff(userDid, () => appViewAgent.api.app.bsky.actor.getProfiles({ actors: batchDids }), onUpdate);
+      const profilesRes = await fetchWithBackoff(
+        userDid,
+        () => appViewAgent.api.app.bsky.actor.getProfiles({ actors: batchDids }),
+        onUpdate,
+      );
       if (profilesRes.data && profilesRes.data.profiles) {
-        const profilesMap = new Map(profilesRes.data.profiles.map(p => [p.did, p]));
+        const profilesMap = new Map(profilesRes.data.profiles.map((p) => [p.did, p]));
         for (const f of batch) {
           const p = profilesMap.get(f.did);
           if (p) {
@@ -532,8 +600,9 @@ async function runSync(agent, userDid, onUpdate) {
             f.criteria.postsCount = p.postsCount || 0;
             f.criteria.isMuted = !!p.viewer?.muted;
             f.criteria.isMassFollower = (p.followsCount || 0) > 3500;
-            f.criteria.isSpammyRatio = (p.followsCount || 0) > 5 * (p.followersCount || 0) && (p.followersCount || 0) < 200;
-            f.criteria.isFlagged = !!(p.labels && p.labels.some(l => isSevereLabel(l.val)));
+            f.criteria.isSpammyRatio =
+              (p.followsCount || 0) > 5 * (p.followersCount || 0) && (p.followersCount || 0) < 200;
+            f.criteria.isFlagged = !!(p.labels && p.labels.some((l) => isSevereLabel(l.val)));
             if (p.viewer) {
               f.criteria.isBlocking = !!p.viewer.blocking;
               f.criteria.isBlocked = !!p.viewer.blockedBy;
@@ -555,7 +624,12 @@ async function runSync(agent, userDid, onUpdate) {
   }
 
   // Analyze latest posts and latest likes using concurrent worker queue
-  await syncCache.updateProgress(userDid, 0, totalFollows, 'Analyzing activity (last posts and last likes)...');
+  await syncCache.updateProgress(
+    userDid,
+    0,
+    totalFollows,
+    'Analyzing activity (last posts and last likes)...',
+  );
   if (onUpdate) onUpdate();
 
   // Throttled concurrency = 12 (optimized for fast parallel fetching)
@@ -580,11 +654,16 @@ async function runSync(agent, userDid, onUpdate) {
       // 1. Get latest post timestamp and calculate posting frequency (Noisy Poster check - posts only, no replies)
       try {
         if (f.criteria.postsCount > 0) {
-          const feedRes = await fetchWithBackoff(userDid, () => appViewAgent.api.app.bsky.feed.getAuthorFeed({
-            actor: f.did,
-            limit: 100,
-            filter: 'posts_no_replies'
-          }), onUpdate);
+          const feedRes = await fetchWithBackoff(
+            userDid,
+            () =>
+              appViewAgent.api.app.bsky.feed.getAuthorFeed({
+                actor: f.did,
+                limit: 100,
+                filter: 'posts_no_replies',
+              }),
+            onUpdate,
+          );
 
           const posts = feedRes.data.feed || [];
           if (posts.length > 0) {
@@ -592,7 +671,7 @@ async function runSync(agent, userDid, onUpdate) {
             f.criteria.lastPostDate = lastPost.indexedAt || lastPost.record?.createdAt || null;
 
             // Count posts/reposts in the last 7 days
-            const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+            const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
             let postsInLast7Days = 0;
             for (const feedItem of posts) {
               const postDateStr = feedItem.post.indexedAt || feedItem.post.record?.createdAt;
@@ -611,7 +690,13 @@ async function runSync(agent, userDid, onUpdate) {
         if (err.message === 'Sync cancelled') throw err;
         console.warn(`Could not fetch post activity for ${f.handle || f.did}:`, err.message || err);
         const errMsg = (err.message || '').toLowerCase();
-        if (err.status === 400 && (errMsg.includes('banned') || errMsg.includes('deactivated') || errMsg.includes('suspended') || errMsg.includes('deleted'))) {
+        if (
+          err.status === 400 &&
+          (errMsg.includes('banned') ||
+            errMsg.includes('deactivated') ||
+            errMsg.includes('suspended') ||
+            errMsg.includes('deleted'))
+        ) {
           f.criteria.isBanned = true;
         } else if (err.status === 403 || errMsg.includes('block')) {
           f.criteria.isBlocking = true;
@@ -622,23 +707,36 @@ async function runSync(agent, userDid, onUpdate) {
 
       // 3. Get mutual follows count (Social Outlier check)
       try {
-        const mutualsRes = await fetchWithBackoff(userDid, () => pdsAgent.api.app.bsky.graph.getKnownFollowers({
-          actor: f.did,
-          limit: 10
-        }), onUpdate);
+        const mutualsRes = await fetchWithBackoff(
+          userDid,
+          () =>
+            pdsAgent.api.app.bsky.graph.getKnownFollowers({
+              actor: f.did,
+              limit: 10,
+            }),
+          onUpdate,
+        );
         const mutuals = mutualsRes.data.followers || [];
         f.criteria.mutualsCount = mutuals.length;
         f.criteria.isOutlier = mutuals.length === 0;
       } catch (err) {
         if (err.message === 'Sync cancelled') throw err;
-        console.warn(`Could not fetch mutual follows for ${f.handle || f.did}:`, err.message || err);
+        console.warn(
+          `Could not fetch mutual follows for ${f.handle || f.did}:`,
+          err.message || err,
+        );
       }
 
       // Periodically update progress
       if (idx % 5 === 0 || idx === followingsList.length - 1) {
         const curCached = await syncCache.get(userDid);
         if (curCached.status !== 'cancelled') {
-          await syncCache.updateProgress(userDid, idx + 1, totalFollows, `Analyzing activity (${idx + 1}/${totalFollows})...`);
+          await syncCache.updateProgress(
+            userDid,
+            idx + 1,
+            totalFollows,
+            `Analyzing activity (${idx + 1}/${totalFollows})...`,
+          );
           await syncCache.set(userDid, { followings: followingsList });
           if (onUpdate) onUpdate();
         }
@@ -664,9 +762,14 @@ async function runSync(agent, userDid, onUpdate) {
   // Completed sync
   await syncCache.set(userDid, {
     status: 'completed',
-    followings: followingsList
+    followings: followingsList,
   });
-  await syncCache.updateProgress(userDid, totalFollows, totalFollows, 'Analysis completed successfully.');
+  await syncCache.updateProgress(
+    userDid,
+    totalFollows,
+    totalFollows,
+    'Analysis completed successfully.',
+  );
   if (onUpdate) onUpdate();
 }
 
@@ -675,14 +778,14 @@ async function runSync(agent, userDid, onUpdate) {
  */
 export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
   const cached = await syncCache.get(userDid);
-  const followingsMap = new Map(cached.followings.map(f => [f.did, f]));
+  const followingsMap = new Map(cached.followings.map((f) => [f.did, f]));
 
   // Create a dedicated PDS agent for write operations to bypass read-only AppView limitations
   const pdsAgent = new Agent(agent.sessionManager);
 
   const results = {
     success: [],
-    failed: []
+    failed: [],
   };
 
   for (const did of targetDids) {
@@ -724,7 +827,7 @@ export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
  */
 export async function followUser(agent, userDid, targetDid, onUpdate) {
   const cached = await syncCache.get(userDid);
-  const f = cached.followings.find(item => item.did === targetDid);
+  const f = cached.followings.find((item) => item.did === targetDid);
   if (!f) {
     throw new Error('User not found in cache');
   }
@@ -734,7 +837,7 @@ export async function followUser(agent, userDid, targetDid, onUpdate) {
 
   const response = await pdsAgent.follow(targetDid);
   f.followingUri = response.uri;
-  
+
   await syncCache.set(userDid, { followings: cached.followings });
   if (onUpdate) onUpdate();
 
