@@ -1,31 +1,6 @@
 # ByeSky — Bluesky Followings Cleanup
 
-ByeSky is a minimal, secure, and client-side web application designed to help Bluesky / Atmosphere users audit and clean up their followings list. It retrieves your followings, scores each account on custom criteria (such as inactivity, lack of follow-back, or absence of mutual interactions), and allows you to dynamically filter, sort, and batch-unfollow accounts.
-
-👋 ByeSky is fully local-first, ensuring complete data privacy and security.
-
----
-
-## Key Features
-
-- **100% Client-Side Data Sovereignty**: Authenticates securely using official Bluesky OAuth. No passwords or app passwords are ever collected. All syncing, analysis, and caching occur entirely in your local browser sandbox.
-- **Dynamic Weight-Based Scoring**: Real-time client-side scoring calculations. Drag weight sliders (0-5 scale) to immediately adjust what matters to you (e.g. inactive periods, spammy follow-to-follower ratios, social outliers, or deleted accounts).
-- **Progressive Background Sync**: High-performance async worker pool fetches profile statistics and scans recent notification/chat logs safely with built-in rate-limit backoff and jitter delays.
-- **Refined Data-Explorer Layout**: A highly compact, scannable table dashboard featuring:
-  - Tabular monospace numbers and handle subtexts for fast scanning.
-  - Custom flat slider trackbars and micro-capsule warning badges.
-  - Cohesive keyboard focus indicators (`:focus-visible`) across all clickable elements for high-end accessibility.
-- **Accident-Proof Safety Modal**: Single unfollow actions are immediate, but select-all or batch unfollows of more than 10 accounts trigger an explicit confirmation warning modal.
-
----
-
-## Technical Stack
-
-- **Frontend**: Pure Vanilla HTML5, CSS3, and ES6 JavaScript Modules.
-- **Bundler & Dev Server**: Vite 6.0 (for blazing-fast compilation and Hot Module Replacement).
-- **Storage**: Browser-native IndexedDB via `UserSyncCache` (`src/cache.js`) with a seamless in-memory fallback for testing.
-- **Testing Suite**: Native Node.js test runner (`node:test`, `node:assert`).
-- **Code Quality**: Prettier formatter and modern ESLint 9 Flat Config (running static security analysis with `eslint-plugin-security` and quality rules via `eslint-plugin-sonarjs`).
+ByeSky is a minimal client-side web application designed to help Bluesky / Atmosphere users audit and clean up their following list. It retrieves your followings, scores each account on custom criteria (such as inactivity, lack of follow-back, or absence of mutual interactions), and allows you to dynamically filter, sort, and batch-unfollow accounts.
 
 ---
 
@@ -93,9 +68,3 @@ We utilize modern configurations to keep the codebase highly maintainable, forma
   ```bash
   npm run lint
   ```
-
----
-
-## License
-
-This project is open-source and licensed under the terms of the [Apache License, Version 2.0](LICENSE).
