@@ -70,6 +70,17 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Unified Keyboard Focus Indicators */
+:focus-visible {
+  outline: 2px solid var(--primary) !important;
+  outline-offset: 2px !important;
+}
+
+/* Slider track offset adjustment for aesthetics */
+input[type='range']:focus-visible {
+  outline-offset: 4px !important;
+}
+
 /* Common Layout Elements */
 .container {
   max-width: 1600px;
@@ -390,11 +401,6 @@ input[type='range'] {
   outline: none;
   margin: 4px 0;
   transition: var(--transition);
-}
-
-input[type='range']:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 4px;
 }
 
 input[type='range']::-webkit-slider-thumb {
