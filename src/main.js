@@ -427,7 +427,8 @@ async function handleLogin(e) {
 
     // Pass the original preview origin in the state parameter if initiated from a preview channel
     const origin = window.location.origin;
-    const isProduction = origin === 'https://bye-sky.web.app' || origin === 'https://bye-sky.firebaseapp.com';
+    const isProduction =
+      origin === 'https://bye-sky.web.app' || origin === 'https://bye-sky.firebaseapp.com';
     const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1');
     const isPreview = !isProduction && !isLocal;
 

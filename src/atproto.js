@@ -66,7 +66,8 @@ export function initOAuthClient() {
     });
   } else {
     // If running on a Firebase Hosting preview channel, route OAuth requests through the production domain
-    const isProduction = origin === 'https://bye-sky.web.app' || origin === 'https://bye-sky.firebaseapp.com';
+    const isProduction =
+      origin === 'https://bye-sky.web.app' || origin === 'https://bye-sky.firebaseapp.com';
     const baseOrigin = isProduction ? origin : 'https://bye-sky.web.app';
     const redirectUri = baseOrigin + '/';
 
