@@ -925,15 +925,17 @@ function renderDashboard(resetSelection = true) {
       const displayNameHTML = truncateText(item.displayName || item.handle.split('.')[0], 16);
       const handleHTML = truncateText('@' + item.handle, 20);
 
+      let checkboxHTML;
+      if (isUnfollowed) {
+        checkboxHTML = '<span class="text-muted text-center" style="display: block; opacity: 0.5;">—</span>';
+      } else {
+        const checkedAttr = state.selectedDids.has(item.did) ? 'checked' : '';
+        checkboxHTML = `<input type="checkbox" class="row-checkbox" data-did="${item.did}" ${checkedAttr}>`;
+      }
+
       row.innerHTML = `
         <td class="col-checkbox">
-          ${
-            isUnfollowed
-              ? '<span class="text-muted text-center" style="display: block; opacity: 0.5;">—</span>'
-              : `
-            <input type="checkbox" class="row-checkbox" data-did="${item.did}" ${state.selectedDids.has(item.did) ? 'checked' : ''}>
-          `
-          }
+          ${checkboxHTML}
         </td>
         <td>
           <div class="profile-cell" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">
