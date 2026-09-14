@@ -25,7 +25,34 @@ jobs:
 
       - run: npm ci && npm run check && npm run build
 
-      - uses: FirebaseExtended/action-hosting-deploy@v0
+      - name: Deploy to Firebase Hosting Preview Channel
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        id: firebase_deploy
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BYE_SKY }}
+          projectId: bye-sky
+
+      - name: Inject Dynamic Preview URL into OAuth Metadata
+        run: |
+          node -e "
+            const fs = require('fs');
+            const urls = '${{ steps.firebase_deploy.outputs.urls }}'.trim().split(/[\s,]+/);
+            const url = urls[0];
+            if (url) {
+              const file = 'dist/client-metadata.json';
+              let content = fs.readFileSync(file, 'utf8');
+              content = content.replace(/https:\/\/bye-sky\.web.app/g, url);
+              fs.writeFileSync(file, content, 'utf8');
+              console.log('Successfully injected preview URL:', url);
+            } else {
+              console.error('No preview URL found in action output!');
+              process.exit(1);
+            }
+          "
+
+      - name: Redeploy Updated Metadata to Same Channel
+        uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BYE_SKY }}
