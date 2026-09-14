@@ -105,6 +105,24 @@ const modalConfirmBtn = document.getElementById('modal-confirm-btn');
 
 // --- Initialization ---
 window.addEventListener('DOMContentLoaded', async () => {
+  // Handle proxy redirect for Firebase Hosting preview channels
+  const urlParams = new URLSearchParams(window.location.search);
+  const stateParam = urlParams.get('state');
+  if (stateParam) {
+    try {
+      const parsed = JSON.parse(stateParam);
+      if (parsed && parsed.r && parsed.r.startsWith('https://bye-sky--')) {
+        // Redirect back to the preview channel
+        const previewUrl = new window.URL(window.location.href);
+        previewUrl.host = new window.URL(parsed.r).host;
+        window.location.replace(previewUrl.toString());
+        return;
+      }
+    } catch (err) {
+      console.warn('Failed to parse proxy state:', err);
+    }
+  }
+
   // Conforms with RFC 8252 loopback IP policies (which prohibit "localhost" hostnames)
   if (window.location.hostname === 'localhost') {
     window.location.replace(window.location.href.replace('localhost', '127.0.0.1'));
@@ -115,7 +133,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
 
   // Handle errors redirected back from OAuth flow
-  const urlParams = new URLSearchParams(window.location.search);
   const callbackError = urlParams.get('error');
   if (callbackError) {
     loginError.textContent = decodeURIComponent(callbackError);
@@ -407,8 +424,20 @@ async function handleLogin(e) {
 
   try {
     const oauthClient = initOAuthClient();
+
+    // Pass the original preview origin in the state parameter if initiated from a preview channel
+    const origin = window.location.origin;
+    const isProduction = origin === 'https://bye-sky.web.app' || origin === 'https://bye-sky.firebaseapp.com';
+    const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1');
+    const isPreview = !isProduction && !isLocal;
+
+    const signInOptions = {};
+    if (isPreview) {
+      signInOptions.state = JSON.stringify({ r: origin });
+    }
+
     // Redirects browser window to user's PDS auth page
-    await oauthClient.signIn(handle);
+    await oauthClient.signIn(handle, signInOptions);
   } catch (err) {
     loginError.textContent = err.message || 'OAuth initiation failed.';
     loginError.classList.remove('hidden');

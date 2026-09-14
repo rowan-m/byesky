@@ -53,24 +53,29 @@ export function initOAuthClient() {
   if (oauthClient) return oauthClient;
 
   const origin = window.location.origin;
-  const redirectUri = origin + '/';
 
   // For localhost / local loopback, use the special Client ID format with query parameters
   const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1');
 
   if (isLocal) {
+    const redirectUri = origin + '/';
     const clientId = `http://localhost?redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent('atproto transition:generic repo:app.bsky.graph.follow')}`;
     oauthClient = new BrowserOAuthClient({
       handleResolver: 'https://bsky.social',
       clientMetadata: atprotoLoopbackClientMetadata(clientId),
     });
   } else {
+    // If running on a Firebase Hosting preview channel, route OAuth requests through the production domain
+    const isProduction = origin === 'https://bye-sky.web.app' || origin === 'https://bye-sky.firebaseapp.com';
+    const baseOrigin = isProduction ? origin : 'https://bye-sky.web.app';
+    const redirectUri = baseOrigin + '/';
+
     oauthClient = new BrowserOAuthClient({
       handleResolver: 'https://bsky.social',
       clientMetadata: {
-        client_id: `${origin}/client-metadata.json`,
+        client_id: `${baseOrigin}/client-metadata.json`,
         client_name: 'ByeSky',
-        client_uri: origin,
+        client_uri: baseOrigin,
         redirect_uris: [redirectUri],
         scope: 'atproto transition:generic repo:app.bsky.graph.follow',
         grant_types: ['authorization_code', 'refresh_token'],
