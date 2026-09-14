@@ -750,3 +750,29 @@ tr.unfollowed-row td {
 .text-danger { color: var(--danger); }
 .text-success { color: var(--success); }
 .text-warning { color: var(--warning); }
+
+/* App Footer */
+.app-footer {
+  text-align: center;
+  padding: 16px 0;
+  margin-top: 24px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-color);
+}
+
+.app-footer p {
+  margin: 0;
+}
+
+.app-footer a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-weight: 600;
+  transition: var(--transition);
+}
+
+.app-footer a:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
