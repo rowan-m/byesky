@@ -389,6 +389,12 @@ input[type='range'] {
   background: var(--border-color);
   outline: none;
   margin: 4px 0;
+  transition: var(--transition);
+}
+
+input[type='range']:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
 }
 
 input[type='range']::-webkit-slider-thumb {
