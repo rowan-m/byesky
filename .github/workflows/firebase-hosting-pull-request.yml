@@ -37,8 +37,14 @@ jobs:
         run: |
           node -e "
             const fs = require('fs');
-            const urls = '${{ steps.firebase_deploy.outputs.urls }}'.trim().split(/[\s,]+/);
-            const url = urls[0];
+            const rawUrls = '${{ steps.firebase_deploy.outputs.urls }}'.trim();
+            let parsed;
+            try {
+              parsed = JSON.parse(rawUrls);
+            } catch (err) {
+              parsed = rawUrls.replace(/[\[\]\"']/g, '').split(/[\s,]+/);
+            }
+            const url = Array.isArray(parsed) ? parsed[0] : parsed;
             if (url) {
               const file = 'dist/client-metadata.json';
               let content = fs.readFileSync(file, 'utf8');
