@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ByeSky — Bluesky Followings Cleanup</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-container">
+      <h1 class="logo">ByeSky</h1>
+      <div id="user-profile" class="hidden" style="display: flex; gap: 12px; align-items: center;">
+        <span id="user-handle" class="user-handle"></span>
+        <span id="last-synced-time" class="last-synced-time" style="font-size: 0.85rem; color: var(--text-secondary);"></span>
+        <button id="resync-btn" class="btn btn-secondary">Resync Follow List</button>
+        <button id="logout-btn" class="btn btn-secondary">Log Out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Section 1: Account Connection -->
+    <section id="auth-section" class="card">
+      <h2>Account Connection</h2>
+      <p class="description">Securely authorize ByeSky to access your followings using standard Bluesky OAuth. No passwords are required.</p>
+      
+      <form id="login-form">
+        <div class="form-group">
+          <label for="login-handle">Bluesky Handle</label>
+          <input type="text" id="login-handle" placeholder="username.bsky.social" required autocomplete="username">
+        </div>
+        <div id="login-error" class="error-msg hidden"></div>
+        <button type="submit" id="login-btn" class="btn btn-primary">Connect with Bluesky</button>
+      </form>
+    </section>
+
+    <!-- Section 2: Sync and Analysis Progress -->
+    <section id="sync-section" class="card hidden">
+      <h2>Analyzing Followings</h2>
+      <p class="description">Retrieving profile statistics and analyzing recent activity. This may take a minute depending on the number of follows.</p>
+      
+      <div class="progress-container">
+        <div class="progress-bar-track">
+          <div id="sync-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
+        </div>
+        <div class="progress-stats">
+          <span id="sync-stage">Starting sync...</span>
+          <span id="sync-percent">0%</span>
+        </div>
+      </div>
+
+      <div id="sync-error" class="error-msg hidden"></div>
+
+      <div class="sync-actions" style="margin-top: 16px; display: flex; gap: 12px; justify-content: center;">
+        <button id="cancel-sync-btn" class="btn btn-secondary">Cancel Sync</button>
+        <button id="retry-sync-btn" class="btn btn-primary hidden">Try Sync Again</button>
+      </div>
+    </section>
+
+    <!-- Section 3: Cleanup Dashboard -->
+    <section id="dashboard-section" class="hidden">
+      <div class="dashboard-grid">
+        
+        <!-- Sidebar: Criteria Weights & Dynamic Filters -->
+        <aside class="sidebar card">
+          <h3>Scoring Criteria</h3>
+          <p class="section-desc">Set weights for how much each item impacts the score (0-5 scale). Accounts with higher scores represent stronger reasons to unfollow.</p>
+          
+          <div class="weights-group">
+            <!-- 1. Status / Account Vitality -->
+            <div class="slider-control">
+              <div class="slider-labels">
+                <label for="weight-deleted-banned">Deleted or Banned</label>
+                <span id="val-deleted-banned">4</span>
+              </div>
+              <input type="range" id="weight-deleted-banned" min="0" max="5" value="4">
+            </div>
+
+            <div class="slider-control">
+              <div class="slider-labels">
+                <label for="weight-inactive">Inactive (No posts)</label>
+                <span id="val-inactive">4</span>
+              </div>
+              <input type="range" id="weight-inactive" min="0" max="5" value="4">
+            </div>
+
+            <div class="slider-control">
+              <div class="slider-labels">
+                <label for="weight-muted">Muted Account</label>
+                <span id="val-muted">4</span>
+              </div>
+              <input type="range" id="weight-muted" min="0" max="5" value="4">
+            </div>
+
+            <div class="slider-control">
+              <div class="slider-labels">
+                <label for="weight-flagged">Moderation Flags</label>
+                <span id="val-flagged">3</span>
+              </div>
+              <input type="range" id="weight-flagged" min="0" max="5" value="3">
+            </div>
+
+            <!-- 2. Interactions -->
+            <div class="slider-control">
+              <div class="slider-labels">
+                <label for="weight-blocking">Blocking Me</label>
+                <span id="val-blocking">4</span>
+              </div>
+              <input type="range" id="weight-blocking" min="0" max="5" value="4">
+            </div>
+
+            <div class="slider-control">
+              <div class="slider-labels">
+                <label for="weight-not-following">Not Following Back</label>
+                <span id="val-not-following">1</span>
+              </div>
+              <input type="range" id="weight-not-following" min="0" max="5" value="1">
+            </div>
+
+            <div class="slider-control">
+              <div class="slider-labels">
+                <label for="weight-no-inbound">No Inbound Interaction (From Them)</label>
+                <span id="val-no-inbound">1</span>
+              </div>
+              <input type="range" id="weight-no-inbound" min="0" max="5" value="1">
+            </div>
+
+            <div class="slider-control">
+              <div class="slider-labels">
+                <label for="weight-no-outbound">No Outbound Interaction (From Me)</label>
+                <span id="val-no-outbound">5</span>
+              </div>
+              <input type="range" id="weight-no-outbound" min="0" max="5" value="5">
+            </div>
+
+            <!-- 3. Social Graph / Connectivity -->
+            <div class="slider-control">
+              <div class="slider-labels">
+                <label for="weight-outlier">Social Outlier (0 Mutuals)</label>
+                <span id="val-outlier">1</span>
+              </div>
+              <input type="range" id="weight-outlier" min="0" max="5" value="1">
+            </div>
+
+            <div class="slider-control">
+              <div class="slider-labels">
+                <label for="weight-mass-follower">Mass Follower</label>
+                <span id="val-mass-follower">1</span>
+              </div>
+              <input type="range" id="weight-mass-follower" min="0" max="5" value="1">
+            </div>
+
+            <div class="slider-control">
+              <div class="slider-labels">
+                <label for="weight-spammy-ratio">Spammy Ratio</label>
+                <span id="val-spammy-ratio">1</span>
+              </div>
+              <input type="range" id="weight-spammy-ratio" min="0" max="5" value="1">
+            </div>
+
+            <!-- 4. Posting Activity -->
+            <div class="slider-control">
+              <div class="slider-labels">
+                <label for="weight-noisy">Noisy Poster (High posts frequency)</label>
+                <span id="val-noisy">1</span>
+              </div>
+              <input type="range" id="weight-noisy" min="0" max="5" value="1">
+            </div>
+          </div>
+
+          <hr class="divider">
+
+          <h3>Active Filters</h3>
+          <div class="filters-group">
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-ok" checked>
+              <span style="font-weight: 600; color: var(--success);">OK / Clean Accounts</span>
+            </label>
+
+            <!-- 1. Status / Account Vitality -->
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-deleted-banned" checked>
+              <span>Deleted or Banned</span>
+            </label>
+
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-inactive" checked>
+              <span>Inactive</span>
+            </label>
+            <div class="nested-control">
+              <label for="param-inactive-days">Inactive after (days):</label>
+              <input type="number" id="param-inactive-days" value="180" min="7" max="730">
+            </div>
+
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-muted" checked>
+              <span>Muted Account</span>
+            </label>
+
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-flagged" checked>
+              <span>Moderation Flags</span>
+            </label>
+
+            <!-- 2. Interactions -->
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-blocking" checked>
+              <span>Blocking Me</span>
+            </label>
+
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-not-following" checked>
+              <span>Does Not Follow Back</span>
+            </label>
+
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-no-inbound" checked>
+              <span>They Haven't Interacted (Inbound)</span>
+            </label>
+
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-no-outbound" checked>
+              <span>I Haven't Interacted (Outbound)</span>
+            </label>
+
+            <!-- 3. Social Graph / Connectivity -->
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-outlier" checked>
+              <span>Social Outlier (0 Mutuals)</span>
+            </label>
+
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-mass-follower" checked>
+              <span>Mass Follower</span>
+            </label>
+            <div class="nested-control">
+              <label for="param-mass-follower">Follow threshold:</label>
+              <input type="number" id="param-mass-follower" value="3500" min="100" max="100000" step="100">
+            </div>
+
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-spammy-ratio" checked>
+              <span>Spammy Follow/Follower Ratio</span>
+            </label>
+
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-low-followers" checked>
+              <span>Low Followers</span>
+            </label>
+            <div class="nested-control">
+              <label for="param-low-followers">Follower threshold:</label>
+              <input type="number" id="param-low-followers" value="50" min="0" max="100000">
+            </div>
+
+            <!-- 4. Posting Activity -->
+            <label class="checkbox-control">
+              <input type="checkbox" id="filter-noisy" checked>
+              <span>Noisy Poster (High frequency)</span>
+            </label>
+            <div class="nested-control">
+              <label for="param-noisy-posts">Post threshold (7 days):</label>
+              <input type="number" id="param-noisy-posts" value="20" min="1" max="100">
+            </div>
+          </div>
+        </aside>
+
+        <!-- Main Dashboard: Controls and Table -->
+        <div class="dashboard-main">
+          <!-- Controls Toolbar -->
+          <div class="toolbar card">
+            <div class="search-box">
+              <input type="text" id="table-search" placeholder="Search by name or handle...">
+            </div>
+            <div class="toolbar-actions">
+              <button id="batch-unfollow-btn" class="btn btn-danger hidden" disabled>Unfollow Selected (<span id="selected-count">0</span>)</button>
+            </div>
+          </div>
+
+          <!-- Top Pagination Controls -->
+          <div class="pagination-container pagination-top">
+            <span class="pagination-info">Showing 0 - 0 of 0 accounts</span>
+            <div class="pagination-controls">
+              <button class="btn btn-secondary btn-sm prev-page-btn" disabled>Previous</button>
+              <span class="pagination-pages"></span>
+              <button class="btn btn-secondary btn-sm next-page-btn" disabled>Next</button>
+            </div>
+          </div>
+
+          <!-- Table Container -->
+          <div class="table-container card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th class="col-checkbox">
+                    <input type="checkbox" id="select-all">
+                  </th>
+                  <th>Profile</th>
+                  <th class="sortable" data-sort="followers">Followers</th>
+                  <th class="sortable" data-sort="lastPost">Last Post</th>
+                  <th class="sortable" data-sort="lastInteraction">Last Interaction</th>
+                  <th>Criteria Flags</th>
+                  <th class="sortable text-center" data-sort="score">Score</th>
+                  <th class="text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="table-body">
+                <!-- Rows injected dynamically via Javascript -->
+              </tbody>
+            </table>
+            
+            <div id="empty-state" class="empty-state hidden">
+              <p>No followings match the active filters and search criteria.</p>
+            </div>
+          </div>
+
+          <!-- Bottom Pagination Controls -->
+          <div class="pagination-container pagination-bottom">
+            <span class="pagination-info">Showing 0 - 0 of 0 accounts</span>
+            <div class="pagination-controls">
+              <button class="btn btn-secondary btn-sm prev-page-btn" disabled>Previous</button>
+              <span class="pagination-pages"></span>
+              <button class="btn btn-secondary btn-sm next-page-btn" disabled>Next</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal Backdrop for confirmation -->
+  <div id="confirm-modal" class="modal-backdrop hidden">
+    <div class="modal card">
+      <h3 id="modal-title" class="danger">Unfollow Confirmation</h3>
+      <p id="modal-desc"></p>
+      <div class="modal-buttons">
+        <button id="modal-cancel-btn" class="btn btn-secondary">Cancel</button>
+        <button id="modal-confirm-btn" class="btn btn-danger">Unfollow</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/src/main.js" type="module"></script>
+</body>
+</html>

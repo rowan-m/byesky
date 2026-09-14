@@ -1,0 +1,22 @@
+{
+  "name": "byesky",
+  "version": "1.0.0",
+  "description": "ByeSky — Bluesky Followings Cleanup",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@atproto/api": "^0.20.44",
+    "@atproto/oauth-client-browser": "^0.3.1"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}
