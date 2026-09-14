@@ -927,7 +927,8 @@ function renderDashboard(resetSelection = true) {
 
       let checkboxHTML;
       if (isUnfollowed) {
-        checkboxHTML = '<span class="text-muted text-center" style="display: block; opacity: 0.5;">—</span>';
+        checkboxHTML =
+          '<span class="text-muted text-center" style="display: block; opacity: 0.5;">—</span>';
       } else {
         const checkedAttr = state.selectedDids.has(item.did) ? 'checked' : '';
         checkboxHTML = `<input type="checkbox" class="row-checkbox" data-did="${item.did}" ${checkedAttr}>`;
