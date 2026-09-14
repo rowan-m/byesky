@@ -22,3 +22,6 @@ cache/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Firebase local folder
+.firebase/
