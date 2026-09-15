@@ -64,6 +64,7 @@ let state = {
 };
 
 // DOM Elements
+const appLoadingSection = document.getElementById('app-loading-section');
 const authSection = document.getElementById('auth-section');
 const syncSection = document.getElementById('sync-section');
 const dashboardSection = document.getElementById('dashboard-section');
@@ -538,7 +539,8 @@ async function loadFollowings() {
     const cachedState = await syncCache.get(state.user.did);
     state.followings = cachedState.followings || [];
 
-    // Hide progress and auth connection card, show dashboard
+    // Hide progress, loader, and auth connection card, show dashboard
+    hideLoading();
     authSection.classList.add('hidden');
     syncSection.classList.add('hidden');
     dashboardSection.classList.remove('hidden');
@@ -1148,7 +1150,14 @@ async function handleRefollow(did, handle, buttonEl) {
 }
 
 // --- Styling/State Presentation Helpers ---
+function hideLoading() {
+  if (appLoadingSection) {
+    appLoadingSection.classList.add('hidden');
+  }
+}
+
 function showAuthSection() {
+  hideLoading();
   authSection.classList.remove('hidden');
   syncSection.classList.add('hidden');
   dashboardSection.classList.add('hidden');
@@ -1161,6 +1170,7 @@ function showUserSession(handle) {
 }
 
 function showSyncSection(syncState) {
+  hideLoading();
   authSection.classList.add('hidden');
   dashboardSection.classList.add('hidden');
   syncSection.classList.remove('hidden');
@@ -1171,6 +1181,8 @@ function showSyncSection(syncState) {
 }
 
 function showSyncError(errMessage) {
+  hideLoading();
+  syncSection.classList.remove('hidden');
   syncStage.textContent = 'Sync Failed';
   syncPercent.textContent = '';
   syncError.textContent = errMessage;
@@ -1180,6 +1192,8 @@ function showSyncError(errMessage) {
 }
 
 function showSyncCancelled(errMessage) {
+  hideLoading();
+  syncSection.classList.remove('hidden');
   syncStage.textContent = 'Sync Cancelled';
   syncPercent.textContent = '';
   syncError.textContent = errMessage;

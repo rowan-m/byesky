@@ -28,8 +28,16 @@
     </header>
 
     <main class="container">
+      <!-- App Loading State -->
+      <section id="app-loading-section" class="card">
+        <div class="spinner"></div>
+        <p style="font-size: 1.1rem; color: var(--text-secondary); margin: 0; font-weight: 500">
+          Loading ByeSky...
+        </p>
+      </section>
+
       <!-- Section 1: Account Connection -->
-      <section id="auth-section" class="card">
+      <section id="auth-section" class="card hidden">
         <h2>Clean up your Bluesky Followings</h2>
         <p class="description">
           ByeSky helps you identify inactive, muted, or low-value accounts in your followings. Set
