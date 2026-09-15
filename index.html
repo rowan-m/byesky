@@ -303,7 +303,12 @@
             <!-- Controls Toolbar -->
             <div class="toolbar card">
               <div class="search-box">
-                <input type="text" id="table-search" placeholder="Search by name or handle..." />
+                <input
+                  type="text"
+                  id="table-search"
+                  placeholder="Search by name or handle..."
+                  aria-label="Search followings by display name or handle"
+                />
               </div>
               <div class="toolbar-actions">
                 <button id="batch-unfollow-btn" class="btn btn-danger hidden" disabled>
@@ -328,7 +333,11 @@
                 <thead>
                   <tr>
                     <th class="col-checkbox">
-                      <input type="checkbox" id="select-all" />
+                      <input
+                        type="checkbox"
+                        id="select-all"
+                        aria-label="Select all accounts on this page"
+                      />
                     </th>
                     <th>Profile</th>
                     <th class="sortable" data-sort="followers">Followers</th>

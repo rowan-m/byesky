@@ -931,7 +931,7 @@ function renderDashboard(resetSelection = true) {
           '<span class="text-muted text-center" style="display: block; opacity: 0.5;">—</span>';
       } else {
         const checkedAttr = state.selectedDids.has(item.did) ? 'checked' : '';
-        checkboxHTML = `<input type="checkbox" class="row-checkbox" data-did="${item.did}" ${checkedAttr}>`;
+        checkboxHTML = `<input type="checkbox" class="row-checkbox" data-did="${item.did}" ${checkedAttr} aria-label="Select ${escapeHTML(item.displayName || item.handle)} for batch actions">`;
       }
 
       row.innerHTML = `
@@ -960,10 +960,10 @@ function renderDashboard(resetSelection = true) {
           ${
             isUnfollowed
               ? `
-            <button class="btn btn-primary btn-sm refollow-single-btn" data-did="${item.did}" data-handle="${item.handle}">Re-follow</button>
+            <button class="btn btn-primary btn-sm refollow-single-btn" data-did="${item.did}" data-handle="${item.handle}" aria-label="Re-follow ${escapeHTML(item.displayName || item.handle)}">Re-follow</button>
           `
               : `
-            <button class="btn btn-secondary btn-sm unfollow-single-btn" data-did="${item.did}" data-handle="${item.handle}">Unfollow</button>
+            <button class="btn btn-secondary btn-sm unfollow-single-btn" data-did="${item.did}" data-handle="${item.handle}" aria-label="Unfollow ${escapeHTML(item.displayName || item.handle)}">Unfollow</button>
           `
           }
         </td>
