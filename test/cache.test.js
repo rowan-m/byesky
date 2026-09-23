@@ -64,11 +64,20 @@ test('UserSyncCache Core Operations', async (t) => {
     },
   );
 
-  await t.test('should wipe records from memory on clear', async () => {
+  await t.test('should preserve lockedDids across cache clears and resyncs', async () => {
+    await syncCache.setLockedDids(testDid, [
+      'did:plc:friend1',
+      'did:plc:friend2',
+      'did:plc:friend1',
+    ]);
+    const lockedBefore = await syncCache.getLockedDids(testDid);
+    assert.deepStrictEqual(lockedBefore, ['did:plc:friend1', 'did:plc:friend2']);
+
     await syncCache.clear(testDid);
     const entry = await syncCache.get(testDid);
-    // Cleared records should return to fresh idle state
+    // Cleared records should return to fresh idle state while preserving lockedDids
     assert.strictEqual(entry.status, 'idle');
     assert.strictEqual(entry.progress.processed, 0);
+    assert.deepStrictEqual(entry.lockedDids, ['did:plc:friend1', 'did:plc:friend2']);
   });
 });

@@ -156,14 +156,23 @@ export function calculateScore(item, weights, params, now = Date.now()) {
 
 export function filterAndSortFollowings(
   followings,
-  { searchQuery, weights, filters, params, sorting },
+  { searchQuery, weights, filters, params, sorting, lockedDids },
   now = Date.now(),
 ) {
+  let lockedSet = new Set();
+  if (lockedDids instanceof Set) {
+    lockedSet = lockedDids;
+  } else if (Array.isArray(lockedDids)) {
+    lockedSet = new Set(lockedDids);
+  }
+  const showLocked = filters.locked !== undefined ? filters.locked : true;
+
   return followings
     .map((item) => {
       const score = calculateScore(item, weights, params, now);
       const dynamicInactive = isUserInactive(item, params.inactiveDays, now);
-      return { ...item, score, dynamicInactive };
+      const isLocked = lockedSet.has(item.did);
+      return { ...item, score, dynamicInactive, isLocked };
     })
     .filter((item) => {
       // Search
@@ -172,6 +181,11 @@ export function filterAndSortFollowings(
         const nMatch = item.displayName && item.displayName.toLowerCase().includes(q);
         const hMatch = item.handle && item.handle.toLowerCase().includes(q);
         if (!nMatch && !hMatch) return false;
+      }
+
+      // Locked / Protected accounts filter
+      if (item.isLocked) {
+        return showLocked;
       }
 
       // Determine warning/inactive criteria matches

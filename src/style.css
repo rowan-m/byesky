@@ -532,12 +532,54 @@ input[type='range']::-webkit-slider-thumb:hover {
 }
 
 .col-checkbox {
-  width: 40px;
+  width: 64px;
   text-align: center;
 }
 
 .col-checkbox input {
   accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.col-checkbox input:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.cell-controls {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.lock-toggle-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--border-radius);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.78rem;
+  line-height: 1;
+  opacity: 0.45;
+  transition: var(--transition);
+}
+
+.lock-toggle-btn:hover {
+  opacity: 1;
+  background-color: var(--bg-app);
+  border-color: var(--border-color);
+}
+
+.lock-toggle-btn.is-locked {
+  opacity: 1;
+  background-color: var(--primary-light);
+  border-color: var(--primary);
 }
 
 /* Monospace alignment fields for data explores */
@@ -636,6 +678,12 @@ input[type='range']::-webkit-slider-thumb:hover {
   background-color: var(--bg-app);
   color: var(--text-secondary);
   border-color: var(--border-color);
+}
+
+.badge-locked {
+  background-color: var(--primary-light);
+  color: var(--primary);
+  border-color: var(--primary);
 }
 
 .score-cell {

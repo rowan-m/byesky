@@ -176,5 +176,21 @@ test('Scoring & Sanitization Helpers', async (t) => {
     assert.strictEqual(isUserInactive(list[0], 180, now), false);
     assert.strictEqual(isUserNoisy(list[0], 20), false);
     assert.strictEqual(isUserMassFollower(list[0], 3500), false);
+
+    // Verify lockedDids filtering: when filters.locked is false, locked accounts are hidden even if they have warning flags
+    const hiddenLocked = filterAndSortFollowings(
+      list,
+      {
+        searchQuery: '',
+        weights: defaultWeights,
+        filters: { ...defaultFilters, locked: false },
+        params: defaultParams,
+        sorting: { col: 'score', order: 'desc' },
+        lockedDids: new Set(['did:plc:banned']),
+      },
+      now,
+    );
+    assert.strictEqual(hiddenLocked.length, 1);
+    assert.strictEqual(hiddenLocked[0].did, 'did:plc:clean');
   });
 });

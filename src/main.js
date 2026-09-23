@@ -23,6 +23,7 @@ let state = {
   },
   followings: [], // Raw followings from backend
   selectedDids: new Set(), // DIDs marked for unfollowing
+  lockedDids: new Set(), // DIDs protected from Select All and unfollowing
   pagination: {
     currentPage: 1,
     pageSize: 100,
@@ -48,6 +49,7 @@ let state = {
   },
   filters: {
     ok: true,
+    locked: true,
     notFollowing: true,
     inactive: true,
     noInbound: true,
@@ -180,6 +182,7 @@ function setupEventListeners() {
   // Checkboxes Filters
   const filterCheckboxes = [
     { id: 'filter-ok', key: 'ok' },
+    { id: 'filter-locked', key: 'locked' },
     { id: 'filter-not-following', key: 'notFollowing' },
     { id: 'filter-inactive', key: 'inactive' },
     { id: 'filter-no-inbound', key: 'noInbound' },
@@ -344,6 +347,7 @@ function initializeStateFromDOM() {
   state.weights.outlier = parseInt(document.getElementById('weight-outlier').value, 10) || 1;
 
   state.filters.ok = document.getElementById('filter-ok').checked;
+  state.filters.locked = document.getElementById('filter-locked').checked;
   state.filters.notFollowing = document.getElementById('filter-not-following').checked;
   state.filters.inactive = document.getElementById('filter-inactive').checked;
   state.filters.noInbound = document.getElementById('filter-no-inbound').checked;
@@ -439,6 +443,7 @@ async function handleLogout() {
   state.agent = null;
   state.followings = [];
   state.selectedDids.clear();
+  state.lockedDids.clear();
   showAuthSection();
 }
 
@@ -449,6 +454,7 @@ async function checkSyncStatus() {
   try {
     const cachedState = await syncCache.get(state.user.did);
     state.sync = cachedState;
+    state.lockedDids = new Set(await syncCache.getLockedDids(state.user.did));
 
     if (cachedState.lastUpdated) {
       lastSyncedTime.textContent = formatLastSynced(cachedState.lastUpdated);
@@ -515,6 +521,7 @@ async function onSyncUpdate() {
   try {
     const cachedState = await syncCache.get(state.user.did);
     state.sync = cachedState;
+    state.lockedDids = new Set(await syncCache.getLockedDids(state.user.did));
 
     if (cachedState.lastUpdated) {
       lastSyncedTime.textContent = formatLastSynced(cachedState.lastUpdated);
@@ -546,6 +553,7 @@ async function loadFollowings() {
   try {
     const cachedState = await syncCache.get(state.user.did);
     state.followings = cachedState.followings || [];
+    state.lockedDids = new Set(await syncCache.getLockedDids(state.user.did));
 
     // Hide progress, loader, and auth connection card, show dashboard
     hideLoading();
@@ -695,6 +703,13 @@ function renderDashboard(resetSelection = true) {
           '<span class="badge badge-success" title="Meets all positive criteria checks">OK</span>';
       }
 
+      const isLocked = state.lockedDids.has(item.did);
+      if (isLocked) {
+        badgesHTML =
+          '<span class="badge badge-locked" title="Protected: This account is locked and excluded from Select All and unfollowing">🔒 LOCKED</span>' +
+          badgesHTML;
+      }
+
       // Score color class (0-5 scale: high score represents strong reason to unfollow)
       let scoreClass = 'score-high';
       if (item.score >= 4) scoreClass = 'score-low';
@@ -705,10 +720,13 @@ function renderDashboard(resetSelection = true) {
       const avatarSrc = item.avatar ? sanitizeUrl(item.avatar, defaultAvatar) : defaultAvatar;
       const safeDid = escapeHTML(item.did);
       const safeHandle = escapeHTML(item.handle);
+      const safeLabelName = escapeHTML(item.displayName || item.handle);
 
       const isUnfollowed = !item.followingUri;
       if (isUnfollowed) {
         row.classList.add('unfollowed-row');
+      } else if (isLocked) {
+        row.classList.add('locked-row');
       } else if (state.selectedDids.has(item.did)) {
         row.classList.add('selected-row');
       }
@@ -759,8 +777,30 @@ function renderDashboard(resetSelection = true) {
         checkboxHTML =
           '<span class="text-muted text-center" style="display: block; opacity: 0.5;">—</span>';
       } else {
-        const checkedAttr = state.selectedDids.has(item.did) ? 'checked' : '';
-        checkboxHTML = `<input type="checkbox" class="row-checkbox" data-did="${safeDid}" ${checkedAttr} aria-label="Select ${escapeHTML(item.displayName || item.handle)} for batch actions">`;
+        const checkedAttr = !isLocked && state.selectedDids.has(item.did) ? 'checked' : '';
+        const disabledAttr = isLocked ? 'disabled' : '';
+        const checkboxLabel = isLocked
+          ? `Account ${safeLabelName} is locked`
+          : `Select ${safeLabelName} for batch actions`;
+        const lockTitle = isLocked
+          ? 'Unlock account (allow selection and unfollowing)'
+          : 'Lock account (protect from Select All and unfollowing)';
+        const lockActionLabel = `${isLocked ? 'Unlock' : 'Lock'} ${safeLabelName}`;
+
+        checkboxHTML = `
+          <div class="cell-controls">
+            <input type="checkbox" class="row-checkbox" data-did="${safeDid}" ${checkedAttr} ${disabledAttr} aria-label="${checkboxLabel}">
+            <button type="button" class="lock-toggle-btn ${isLocked ? 'is-locked' : ''}" data-did="${safeDid}" title="${lockTitle}" aria-label="${lockActionLabel}" aria-pressed="${isLocked}">${isLocked ? '🔒' : '🔓'}</button>
+          </div>
+        `;
+      }
+
+      const unfollowDisabledAttr = isLocked ? 'disabled title="Unlock account to unfollow"' : '';
+      let actionButtonHTML;
+      if (isUnfollowed) {
+        actionButtonHTML = `<button class="btn btn-primary btn-sm refollow-single-btn" data-did="${safeDid}" data-handle="${safeHandle}" aria-label="Re-follow ${safeLabelName}">Re-follow</button>`;
+      } else {
+        actionButtonHTML = `<button class="btn btn-secondary btn-sm unfollow-single-btn" data-did="${safeDid}" data-handle="${safeHandle}" ${unfollowDisabledAttr} aria-label="Unfollow ${safeLabelName}">Unfollow</button>`;
       }
 
       row.innerHTML = `
@@ -786,15 +826,7 @@ function renderDashboard(resetSelection = true) {
         </td>
         <td class="score-cell ${scoreClass}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(item.score)}</td>
         <td class="text-right">
-          ${
-            isUnfollowed
-              ? `
-            <button class="btn btn-primary btn-sm refollow-single-btn" data-did="${safeDid}" data-handle="${safeHandle}" aria-label="Re-follow ${escapeHTML(item.displayName || item.handle)}">Re-follow</button>
-          `
-              : `
-            <button class="btn btn-secondary btn-sm unfollow-single-btn" data-did="${safeDid}" data-handle="${safeHandle}" aria-label="Unfollow ${escapeHTML(item.displayName || item.handle)}">Unfollow</button>
-          `
-          }
+          ${actionButtonHTML}
         </td>
       `;
 
@@ -805,7 +837,24 @@ function renderDashboard(resetSelection = true) {
           await handleRefollow(did, handle, e.target);
         });
       } else {
+        const lockBtn = row.querySelector('.lock-toggle-btn');
+        if (lockBtn) {
+          lockBtn.addEventListener('click', async () => {
+            if (state.lockedDids.has(item.did)) {
+              state.lockedDids.delete(item.did);
+            } else {
+              state.lockedDids.add(item.did);
+              state.selectedDids.delete(item.did);
+            }
+            if (state.user) {
+              await syncCache.setLockedDids(state.user.did, Array.from(state.lockedDids));
+            }
+            renderDashboard(false);
+          });
+        }
+
         row.querySelector('.row-checkbox').addEventListener('change', (e) => {
+          if (state.lockedDids.has(item.did)) return;
           if (e.target.checked) {
             state.selectedDids.add(item.did);
           } else {
@@ -816,6 +865,7 @@ function renderDashboard(resetSelection = true) {
         });
 
         row.querySelector('.unfollow-single-btn').addEventListener('click', async (e) => {
+          if (state.lockedDids.has(item.did)) return;
           const did = e.target.dataset.did;
           await executeUnfollow([did], e.target);
         });
@@ -879,7 +929,9 @@ function renderDashboard(resetSelection = true) {
 }
 
 function renderCheckboxHeaders(pageItems) {
-  const selectableItems = pageItems.filter((item) => Boolean(item.followingUri));
+  const selectableItems = pageItems.filter(
+    (item) => Boolean(item.followingUri) && !state.lockedDids.has(item.did),
+  );
   if (selectableItems.length === 0) {
     selectAllCheckbox.checked = false;
     selectAllCheckbox.disabled = true;
@@ -894,7 +946,9 @@ function handleSelectAllToggle(e) {
   const list = getFilteredAndSortedList();
   const startIdx = (state.pagination.currentPage - 1) * state.pagination.pageSize;
   const endIdx = Math.min(startIdx + state.pagination.pageSize, list.length);
-  const selectableItems = list.slice(startIdx, endIdx).filter((item) => Boolean(item.followingUri));
+  const selectableItems = list
+    .slice(startIdx, endIdx)
+    .filter((item) => Boolean(item.followingUri) && !state.lockedDids.has(item.did));
 
   if (e.target.checked) {
     selectableItems.forEach((item) => state.selectedDids.add(item.did));
@@ -921,18 +975,21 @@ function updateSelectedCounter() {
 
 // --- Action Logic ---
 async function executeUnfollow(dids, buttonEl) {
+  const unlockedDids = dids.filter((did) => !state.lockedDids.has(did));
+  if (unlockedDids.length === 0) return;
+
   if (buttonEl) {
     buttonEl.disabled = true;
     buttonEl.textContent = 'unfollowing...';
   }
 
-  if (!buttonEl && dids.length > 0) {
+  if (!buttonEl && unlockedDids.length > 0) {
     batchUnfollowBtn.disabled = true;
     batchUnfollowBtn.textContent = 'Unfollowing...';
   }
 
   try {
-    const data = await batchUnfollow(state.agent, state.user.did, dids, onSyncUpdate);
+    const data = await batchUnfollow(state.agent, state.user.did, unlockedDids, onSyncUpdate);
 
     // Mark successfully unfollowed DIDs as unfollowed in raw state list
     const successes = data.success || [];
