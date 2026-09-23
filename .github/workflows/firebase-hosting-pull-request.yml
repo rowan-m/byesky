@@ -34,10 +34,12 @@ jobs:
           projectId: bye-sky
 
       - name: Inject Dynamic Preview URL into OAuth Metadata
+        env:
+          RAW_URLS: ${{ steps.firebase_deploy.outputs.urls }}
         run: |
           node -e "
             const fs = require('fs');
-            const rawUrls = '${{ steps.firebase_deploy.outputs.urls }}'.trim();
+            const rawUrls = (process.env.RAW_URLS || '').trim();
             let parsed;
             try {
               parsed = JSON.parse(rawUrls);

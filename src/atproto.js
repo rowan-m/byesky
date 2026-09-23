@@ -1,47 +1,12 @@
 import { BrowserOAuthClient, atprotoLoopbackClientMetadata } from '@atproto/oauth-client-browser';
 import { Agent } from '@atproto/api';
 import { syncCache } from './cache.js';
+import { isSevereLabel, atUriToBskyUrl } from './scoring.js';
 
 // Simple sleep helper
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Helper to identify severe moderation flags / actions
-const SEVERE_LABELS = new Set([
-  'spam',
-  'impersonation',
-  'scam',
-  'deceptive',
-  'misleading',
-  'harassment',
-  'hate',
-  'intolerance',
-  'threat',
-  'rude',
-  'abuse',
-  'violation',
-  'banned',
-  'suspended',
-]);
-
-function isSevereLabel(labelVal) {
-  if (!labelVal) return false;
-  const val = labelVal.toLowerCase();
-  // Protocol global severe actions (e.g. !hide, !warn)
-  if (val === '!hide' || val === '!warn') return true;
-  return SEVERE_LABELS.has(val);
-}
-
-function atUriToBskyUrl(atUri) {
-  if (!atUri || !atUri.startsWith('at://')) return null;
-  const parts = atUri.replace('at://', '').split('/');
-  const did = parts[0];
-  const collection = parts[1]; // e.g. app.bsky.feed.post
-  const rkey = parts[2]; // e.g. 3mv5fw5biui26
-  if (did && collection === 'app.bsky.feed.post' && rkey) {
-    return `https://bsky.app/profile/${did}/post/${rkey}`;
-  }
-  return `https://bsky.app/profile/${did}`;
-}
+const OAUTH_SCOPE = 'atproto transition:generic transition:chat.bsky repo:app.bsky.graph.follow';
 
 export let oauthClient = null;
 
@@ -59,7 +24,7 @@ export function initOAuthClient() {
   const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1');
 
   if (isLocal) {
-    const clientId = `http://localhost?redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent('atproto transition:generic repo:app.bsky.graph.follow')}`;
+    const clientId = `http://localhost?redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(OAUTH_SCOPE)}`;
     oauthClient = new BrowserOAuthClient({
       handleResolver: 'https://bsky.social',
       clientMetadata: atprotoLoopbackClientMetadata(clientId),
@@ -72,7 +37,7 @@ export function initOAuthClient() {
         client_name: 'ByeSky',
         client_uri: origin,
         redirect_uris: [redirectUri],
-        scope: 'atproto transition:generic repo:app.bsky.graph.follow',
+        scope: OAUTH_SCOPE,
         grant_types: ['authorization_code', 'refresh_token'],
         response_types: ['code'],
         token_endpoint_auth_method: 'none',
@@ -138,8 +103,6 @@ async function fetchWithBackoff(userDid, apiCallFn, onUpdate) {
           undefined,
           `Rate limit hit! Pausing for ${seconds}s to avoid blocks...`,
         );
-        // Save state and notify UI
-        await syncCache.set(userDid, {});
         if (onUpdate) onUpdate();
 
         await sleep(backoffMs);
@@ -369,7 +332,11 @@ async function runSync(agent, userDid, onUpdate) {
     if (agent.api.chat && agent.api.chat.bsky && agent.api.chat.bsky.convo) {
       const convos = await fetchWithBackoff(
         userDid,
-        () => agent.api.chat.bsky.convo.listConvos({ limit: 50 }),
+        () =>
+          agent.api.chat.bsky.convo.listConvos(
+            { limit: 50 },
+            { headers: { 'atproto-proxy': 'did:web:api.bsky.chat#bsky_chat' } },
+          ),
         onUpdate,
       );
       if (convos.data && convos.data.convos) {
@@ -387,7 +354,7 @@ async function runSync(agent, userDid, onUpdate) {
                   member.did,
                   msgDate,
                   'message',
-                  `https://bsky.app/messages/convo/${convo.id}`,
+                  `https://bsky.app/messages/convo/${encodeURIComponent(convo.id)}`,
                 );
               }
             }
@@ -507,10 +474,16 @@ async function runSync(agent, userDid, onUpdate) {
           if (targetDid && targetDid.startsWith('did:') && targetDid !== userDid) {
             userOutboundInteractions.add(targetDid);
 
-            // Record the date of Rowan's last like to this user
+            // Record the latest like date to this user
             const likeDate = record.value?.createdAt;
-            if (likeDate && !outboundLikesMap.has(targetDid)) {
-              outboundLikesMap.set(targetDid, likeDate);
+            if (likeDate) {
+              const existingLikeDate = outboundLikesMap.get(targetDid);
+              if (
+                !existingLikeDate ||
+                new Date(likeDate).getTime() > new Date(existingLikeDate).getTime()
+              ) {
+                outboundLikesMap.set(targetDid, likeDate);
+              }
               updateInteraction(targetDid, likeDate, 'like', atUriToBskyUrl(subjectUri));
             }
           }
@@ -736,8 +709,8 @@ async function runSync(agent, userDid, onUpdate) {
             idx + 1,
             totalFollows,
             `Analyzing activity (${idx + 1}/${totalFollows})...`,
+            { followings: followingsList },
           );
-          await syncCache.set(userDid, { followings: followingsList });
           if (onUpdate) onUpdate();
         }
       }
@@ -760,21 +733,21 @@ async function runSync(agent, userDid, onUpdate) {
   if (cancelCheckEnd.status === 'cancelled') return;
 
   // Completed sync
-  await syncCache.set(userDid, {
-    status: 'completed',
-    followings: followingsList,
-  });
   await syncCache.updateProgress(
     userDid,
     totalFollows,
     totalFollows,
     'Analysis completed successfully.',
+    {
+      status: 'completed',
+      followings: followingsList,
+    },
   );
   if (onUpdate) onUpdate();
 }
 
 /**
- * Unfollows a list of DIDs.
+ * Unfollows a list of DIDs using batched com.atproto.repo.applyWrites operations.
  */
 export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
   const cached = await syncCache.get(userDid);
@@ -788,6 +761,8 @@ export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
     failed: [],
   };
 
+  const pendingDeletes = [];
+
   for (const did of targetDids) {
     const f = followingsMap.get(did);
     if (!f) {
@@ -796,23 +771,64 @@ export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
     }
 
     try {
-      if (f.followingUri) {
-        await pdsAgent.deleteFollow(f.followingUri);
-      } else {
+      let followingUri = f.followingUri;
+      if (!followingUri) {
         const profile = await agent.api.app.bsky.actor.getProfile({ actor: did });
-        if (profile.data.viewer?.following) {
-          await pdsAgent.deleteFollow(profile.data.viewer.following);
-        } else {
-          throw new Error('Not currently following this user');
-        }
+        followingUri = profile.data.viewer?.following || null;
       }
 
-      f.followingUri = null;
-      f.criteria.isBlocked = false;
-      results.success.push(did);
+      if (!followingUri) {
+        results.failed.push({ did, error: 'Not currently following this user' });
+        continue;
+      }
+
+      const rkey = followingUri.split('/').pop();
+      if (!rkey) {
+        results.failed.push({ did, error: 'Invalid follow record URI' });
+        continue;
+      }
+
+      pendingDeletes.push({ did, f, followingUri, rkey });
     } catch (err) {
-      console.error(`Error unfollowing ${f.handle || did}:`, err);
+      console.error(`Error resolving follow URI for ${f.handle || did}:`, err);
       results.failed.push({ did, error: err.message });
+    }
+  }
+
+  const chunkSize = 100;
+  for (let i = 0; i < pendingDeletes.length; i += chunkSize) {
+    const chunk = pendingDeletes.slice(i, i + chunkSize);
+    try {
+      await pdsAgent.com.atproto.repo.applyWrites({
+        repo: userDid,
+        writes: chunk.map((item) => ({
+          $type: 'com.atproto.repo.applyWrites#delete',
+          collection: 'app.bsky.graph.follow',
+          rkey: item.rkey,
+        })),
+      });
+
+      for (const item of chunk) {
+        item.f.followingUri = null;
+        item.f.criteria.isBlocked = false;
+        results.success.push(item.did);
+      }
+    } catch (batchErr) {
+      console.warn(
+        'Batch applyWrites failed, falling back to individual deleteFollow calls:',
+        batchErr,
+      );
+      for (const item of chunk) {
+        try {
+          await pdsAgent.deleteFollow(item.followingUri);
+          item.f.followingUri = null;
+          item.f.criteria.isBlocked = false;
+          results.success.push(item.did);
+        } catch (err) {
+          console.error(`Error unfollowing ${item.f.handle || item.did}:`, err);
+          results.failed.push({ did: item.did, error: err.message });
+        }
+      }
     }
   }
 

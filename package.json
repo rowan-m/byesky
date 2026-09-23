@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "ByeSky — Bluesky Followings Cleanup",
   "keywords": [],
-  "license": "ISC",
+  "license": "Apache-2.0",
   "author": "",
   "type": "module",
   "scripts": {

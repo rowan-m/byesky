@@ -40,6 +40,11 @@ class UserSyncCache {
   }
 
   async get(did) {
+    // Serve directly from warm in-memory cache if already loaded in this session
+    if (this.store.has(did)) {
+      return this.store.get(did);
+    }
+
     // If not in browser (e.g. Node tests) or IndexedDB fails, use in-memory store
     if (!isBrowser) {
       return this._getMemoryFallback(did);
@@ -129,15 +134,14 @@ class UserSyncCache {
     }
   }
 
-  async updateProgress(did, processed, total, stage) {
+  async updateProgress(did, processed, total, stage, extraData = {}) {
     const current = await this.get(did);
-    current.progress = {
+    const progress = {
       total: total !== undefined ? total : current.progress.total,
       processed: processed !== undefined ? processed : current.progress.processed,
       currentStage: stage || current.progress.currentStage,
     };
-    current.lastUpdated = Date.now();
-    await this.set(did, current);
+    return this.set(did, { ...extraData, progress });
   }
 
   async clear(did) {

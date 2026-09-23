@@ -1,6 +1,14 @@
 import { Agent } from '@atproto/api';
 import { initOAuthClient, startBackgroundSync, batchUnfollow, followUser } from './atproto.js';
 import { syncCache } from './cache.js';
+import {
+  isUserNoisy,
+  isUserMassFollower,
+  filterAndSortFollowings,
+  escapeHTML,
+  sanitizeUrl,
+  truncateText,
+} from './scoring.js';
 
 // Application State
 let state = {
@@ -198,14 +206,14 @@ function setupEventListeners() {
 
   // Parameters
   document.getElementById('param-inactive-days').addEventListener('input', (e) => {
-    const val = parseInt(e.target.value, 10) || 90;
-    state.params.inactiveDays = val;
+    const val = parseInt(e.target.value, 10);
+    state.params.inactiveDays = Number.isNaN(val) ? 180 : val;
     renderDashboard();
   });
 
   document.getElementById('param-low-followers').addEventListener('input', (e) => {
-    const val = parseInt(e.target.value, 10) || 50;
-    state.params.lowFollowersThreshold = val;
+    const val = parseInt(e.target.value, 10);
+    state.params.lowFollowersThreshold = Number.isNaN(val) ? 50 : val;
     renderDashboard();
   });
 
@@ -551,192 +559,8 @@ async function loadFollowings() {
 }
 
 // --- Scoring, Filtering & Sorting Computations ---
-function calculateScore(item) {
-  if (item.criteria.isDeleted || item.criteria.isBanned) {
-    return state.weights.deletedBanned;
-  }
-  let score = 0;
-
-  if (!item.criteria.isFollowingUser) {
-    score += state.weights.notFollowing;
-  }
-
-  let isInactive = isUserInactive(item);
-  if (isInactive) {
-    score += state.weights.inactive;
-  }
-
-  const hasInbound =
-    item.criteria.hasLikedUser ||
-    item.criteria.hasRepostedUser ||
-    item.criteria.hasRepliedToUser ||
-    item.criteria.hasMessagedUser ||
-    item.criteria.userInteracted;
-  if (!hasInbound) {
-    score += state.weights.noInbound;
-  }
-
-  const hasOutbound = item.criteria.userContactedThem;
-  if (!hasOutbound) {
-    score += state.weights.noOutbound;
-  }
-
-  if (item.criteria.isBlocking || item.criteria.isBlocked) {
-    score += state.weights.blocking;
-  }
-
-  if (isUserNoisy(item)) {
-    score += state.weights.noisy;
-  }
-
-  if (item.criteria.isMuted) {
-    score += state.weights.muted;
-  }
-
-  if (isUserMassFollower(item)) {
-    score += state.weights.massFollower;
-  }
-
-  if (item.criteria.isSpammyRatio) {
-    score += state.weights.spammyRatio;
-  }
-
-  if (item.criteria.isFlagged) {
-    score += state.weights.flagged;
-  }
-
-  if (item.criteria.isOutlier) {
-    score += state.weights.outlier;
-  }
-
-  return score;
-}
-
-function isUserInactive(item) {
-  if (item.criteria.lastPostDate) {
-    const lastPost = new Date(item.criteria.lastPostDate).getTime();
-    const daysSincePost = (Date.now() - lastPost) / (1000 * 60 * 60 * 24);
-    return daysSincePost > state.params.inactiveDays;
-  }
-  return true; // Never posted/no postsCount
-}
-
-function isUserNoisy(item) {
-  const threshold = state.params.noisyPostsThreshold || 20;
-  if (item.criteria.postsCount7Days !== undefined) {
-    return item.criteria.postsCount7Days >= threshold;
-  }
-  return !!item.criteria.isNoisy;
-}
-
-function isUserMassFollower(item) {
-  const threshold = state.params.massFollowerThreshold || 3500;
-  if (item.criteria.followsCount !== undefined) {
-    return item.criteria.followsCount >= threshold;
-  }
-  return !!item.criteria.isMassFollower;
-}
-
 function getFilteredAndSortedList() {
-  return state.followings
-    .map((item) => {
-      const score = calculateScore(item);
-      const dynamicInactive = isUserInactive(item);
-      return { ...item, score, dynamicInactive };
-    })
-    .filter((item) => {
-      // Search
-      if (state.searchQuery) {
-        const q = state.searchQuery.toLowerCase();
-        const nMatch = item.displayName && item.displayName.toLowerCase().includes(q);
-        const hMatch = item.handle && item.handle.toLowerCase().includes(q);
-        if (!nMatch && !hMatch) return false;
-      }
-
-      // Determine warning/inactive criteria matches
-      const hasInbound =
-        item.criteria.hasLikedUser ||
-        item.criteria.hasRepostedUser ||
-        item.criteria.hasRepliedToUser ||
-        item.criteria.hasMessagedUser ||
-        item.criteria.userInteracted;
-
-      const hasOutbound = item.criteria.userContactedThem;
-
-      const criteriaMatches = {
-        notFollowing: !item.criteria.isFollowingUser,
-        inactive: item.dynamicInactive,
-        noInbound: !hasInbound,
-        noOutbound: !hasOutbound,
-        deletedBanned: !!(item.criteria.isDeleted || item.criteria.isBanned),
-        blocking: !!(item.criteria.isBlocking || item.criteria.isBlocked),
-        lowFollowers: item.criteria.followersCount < state.params.lowFollowersThreshold,
-        noisy: isUserNoisy(item),
-        muted: !!item.criteria.isMuted,
-        massFollower: isUserMassFollower(item),
-        spammyRatio: !!item.criteria.isSpammyRatio,
-        flagged: !!item.criteria.isFlagged,
-        outlier: !!item.criteria.isOutlier,
-      };
-
-      // Account has "OK" status if it has none of the warning/inactive flags
-      const isOk =
-        !criteriaMatches.notFollowing &&
-        !criteriaMatches.inactive &&
-        !criteriaMatches.noInbound &&
-        !criteriaMatches.noOutbound &&
-        !criteriaMatches.deletedBanned &&
-        !criteriaMatches.blocking &&
-        !criteriaMatches.lowFollowers &&
-        !criteriaMatches.noisy &&
-        !criteriaMatches.muted &&
-        !criteriaMatches.massFollower &&
-        !criteriaMatches.spammyRatio &&
-        !criteriaMatches.flagged &&
-        !criteriaMatches.outlier;
-
-      // OR Filter check: The item is shown if it matches at least one checked criterion
-      let matchesFilter = false;
-
-      if (isOk && state.filters.ok) matchesFilter = true;
-      if (criteriaMatches.notFollowing && state.filters.notFollowing) matchesFilter = true;
-      if (criteriaMatches.inactive && state.filters.inactive) matchesFilter = true;
-      if (criteriaMatches.noInbound && state.filters.noInbound) matchesFilter = true;
-      if (criteriaMatches.noOutbound && state.filters.noOutbound) matchesFilter = true;
-      if (criteriaMatches.deletedBanned && state.filters.deletedBanned) matchesFilter = true;
-      if (criteriaMatches.blocking && state.filters.blocking) matchesFilter = true;
-      if (criteriaMatches.lowFollowers && state.filters.lowFollowers) matchesFilter = true;
-      if (criteriaMatches.noisy && state.filters.noisy) matchesFilter = true;
-      if (criteriaMatches.muted && state.filters.muted) matchesFilter = true;
-      if (criteriaMatches.massFollower && state.filters.massFollower) matchesFilter = true;
-      if (criteriaMatches.spammyRatio && state.filters.spammyRatio) matchesFilter = true;
-      if (criteriaMatches.flagged && state.filters.flagged) matchesFilter = true;
-      if (criteriaMatches.outlier && state.filters.outlier) matchesFilter = true;
-
-      return matchesFilter;
-    })
-    .sort((a, b) => {
-      let valA, valB;
-      if (state.sorting.col === 'followers') {
-        valA = a.criteria.followersCount;
-        valB = b.criteria.followersCount;
-      } else if (state.sorting.col === 'lastPost') {
-        valA = a.criteria.lastPostDate ? new Date(a.criteria.lastPostDate).getTime() : 0;
-        valB = b.criteria.lastPostDate ? new Date(b.criteria.lastPostDate).getTime() : 0;
-      } else if (state.sorting.col === 'lastInteraction') {
-        const dateA = a.criteria.lastInteraction?.date || a.criteria.lastLikeDate;
-        const dateB = b.criteria.lastInteraction?.date || b.criteria.lastLikeDate;
-        valA = dateA ? new Date(dateA).getTime() : 0;
-        valB = dateB ? new Date(dateB).getTime() : 0;
-      } else if (state.sorting.col === 'score') {
-        valA = a.score;
-        valB = b.score;
-      }
-
-      if (valA < valB) return state.sorting.order === 'asc' ? -1 : 1;
-      if (valA > valB) return state.sorting.order === 'asc' ? 1 : -1;
-      return 0;
-    });
+  return filterAndSortFollowings(state.followings, state);
 }
 
 // --- Render Operations ---
@@ -824,10 +648,10 @@ function renderDashboard(resetSelection = true) {
           '<span class="badge badge-success" title="You liked, replied, or reposted them recently (scanned last 1,000 activities)">I CONTACTED</span>';
       }
 
-      if (isUserNoisy(item)) {
+      if (isUserNoisy(item, state.params.noisyPostsThreshold)) {
         const countStr =
           item.criteria.postsCount7Days !== undefined ? `${item.criteria.postsCount7Days}` : '10+';
-        badgesHTML += `<span class="badge badge-warning" title="Noisy Poster: Writes high frequency of posts/reposts (${countStr} in last 7 days)">NOISY</span>`;
+        badgesHTML += `<span class="badge badge-warning" title="Noisy Poster: Writes high frequency of posts/reposts (${escapeHTML(countStr)} in last 7 days)">NOISY</span>`;
         warningsCount++;
       }
 
@@ -837,12 +661,12 @@ function renderDashboard(resetSelection = true) {
         warningsCount++;
       }
 
-      if (isUserMassFollower(item)) {
+      if (isUserMassFollower(item, state.params.massFollowerThreshold)) {
         const followsCountStr =
           item.criteria.followsCount !== undefined
             ? `${item.criteria.followsCount.toLocaleString()}`
             : '3,500+';
-        badgesHTML += `<span class="badge badge-warning" title="Mass Follower: Follows ${followsCountStr} accounts on Bluesky">MASS FOLLOW</span>`;
+        badgesHTML += `<span class="badge badge-warning" title="Mass Follower: Follows ${escapeHTML(followsCountStr)} accounts on Bluesky">MASS FOLLOW</span>`;
         warningsCount++;
       }
 
@@ -863,7 +687,7 @@ function renderDashboard(resetSelection = true) {
           '<span class="badge badge-warning" title="Social Outlier: Has 0 mutual follows in common with you on Bluesky">0 MUTUALS</span>';
         warningsCount++;
       } else if (item.criteria.mutualsCount > 0) {
-        badgesHTML += `<span class="badge badge-success" title="Mutual Social Graph: Has ${item.criteria.mutualsCount} mutual follows in common with you on Bluesky">${item.criteria.mutualsCount} MUTUALS</span>`;
+        badgesHTML += `<span class="badge badge-success" title="Mutual Social Graph: Has ${escapeHTML(item.criteria.mutualsCount)} mutual follows in common with you on Bluesky">${escapeHTML(item.criteria.mutualsCount)} MUTUALS</span>`;
       }
 
       if (warningsCount === 0) {
@@ -876,9 +700,11 @@ function renderDashboard(resetSelection = true) {
       if (item.score >= 4) scoreClass = 'score-low';
       else if (item.score >= 2) scoreClass = 'score-mid';
 
-      const avatarSrc =
-        item.avatar ||
+      const defaultAvatar =
         "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 24 24' fill='%23cbd5e1'><circle cx='12' cy='12' r='12'/></svg>";
+      const avatarSrc = item.avatar ? sanitizeUrl(item.avatar, defaultAvatar) : defaultAvatar;
+      const safeDid = escapeHTML(item.did);
+      const safeHandle = escapeHTML(item.handle);
 
       const isUnfollowed = !item.followingUri;
       if (isUnfollowed) {
@@ -901,11 +727,12 @@ function renderDashboard(resetSelection = true) {
       // Generate Last Interaction content with type label and bsky.app hyperlink
       const interactionInfo = item.criteria.lastInteraction;
       const renderDate = interactionInfo?.date || item.criteria.lastLikeDate;
-      const relativeDateStr = formatRelativeDate(renderDate);
+      const relativeDateStr = escapeHTML(formatRelativeDate(renderDate));
 
       let cellContentHTML = relativeDateStr;
       if (renderDate && relativeDateStr !== 'Never') {
         let typeLabel = '';
+        const safeType = escapeHTML(interactionInfo?.type || '');
         if (interactionInfo?.type) {
           const typeMap = {
             like: 'Like',
@@ -913,12 +740,12 @@ function renderDashboard(resetSelection = true) {
             repost: 'Repost',
             message: 'DM',
           };
-          typeLabel = ` (${typeMap[interactionInfo.type] || interactionInfo.type})`;
+          typeLabel = ` (${escapeHTML(typeMap[interactionInfo.type] || interactionInfo.type)})`;
         }
 
-        const linkUrl = interactionInfo?.link;
-        if (linkUrl) {
-          cellContentHTML = `<a href="${linkUrl}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline; text-underline-offset: 2px;" title="View last ${interactionInfo.type} on Bluesky">${relativeDateStr}${typeLabel}</a>`;
+        const safeLinkUrl = sanitizeUrl(interactionInfo?.link, '');
+        if (safeLinkUrl) {
+          cellContentHTML = `<a href="${safeLinkUrl}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline; text-underline-offset: 2px;" title="View last ${safeType} on Bluesky">${relativeDateStr}${typeLabel}</a>`;
         } else {
           cellContentHTML = `${relativeDateStr}${typeLabel}`;
         }
@@ -933,7 +760,7 @@ function renderDashboard(resetSelection = true) {
           '<span class="text-muted text-center" style="display: block; opacity: 0.5;">—</span>';
       } else {
         const checkedAttr = state.selectedDids.has(item.did) ? 'checked' : '';
-        checkboxHTML = `<input type="checkbox" class="row-checkbox" data-did="${item.did}" ${checkedAttr} aria-label="Select ${escapeHTML(item.displayName || item.handle)} for batch actions">`;
+        checkboxHTML = `<input type="checkbox" class="row-checkbox" data-did="${safeDid}" ${checkedAttr} aria-label="Select ${escapeHTML(item.displayName || item.handle)} for batch actions">`;
       }
 
       row.innerHTML = `
@@ -942,8 +769,8 @@ function renderDashboard(resetSelection = true) {
         </td>
         <td>
           <div class="profile-cell" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">
-            <a href="https://bsky.app/profile/${item.handle}" target="_blank" rel="noopener noreferrer" class="profile-link">
-              <img class="avatar" src="${avatarSrc}" alt="${item.handle}" loading="lazy">
+            <a href="https://bsky.app/profile/${encodeURIComponent(item.handle)}" target="_blank" rel="noopener noreferrer" class="profile-link">
+              <img class="avatar" src="${avatarSrc}" alt="${safeHandle}" loading="lazy">
               <div class="profile-info">
                 <span class="display-name">${displayNameHTML}</span>
                 <span class="handle">${handleHTML}</span>
@@ -952,20 +779,20 @@ function renderDashboard(resetSelection = true) {
           </div>
         </td>
         <td class="${isLowFollowers ? 'criteria-highlight' : ''}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${item.criteria.followersCount.toLocaleString()}</td>
-        <td class="${isPostInactive ? 'criteria-highlight' : ''}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${formatRelativeDate(item.criteria.lastPostDate)}</td>
+        <td class="${isPostInactive ? 'criteria-highlight' : ''}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(formatRelativeDate(item.criteria.lastPostDate))}</td>
         <td class="${isInteractionInactive ? 'criteria-highlight' : ''}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${cellContentHTML}</td>
         <td style="${isUnfollowed ? 'opacity: 0.5;' : ''}">
           <div class="flags-list">${isUnfollowed ? '<span class="badge badge-secondary">Unfollowed</span>' : badgesHTML}</div>
         </td>
-        <td class="score-cell ${scoreClass}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${item.score}</td>
+        <td class="score-cell ${scoreClass}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(item.score)}</td>
         <td class="text-right">
           ${
             isUnfollowed
               ? `
-            <button class="btn btn-primary btn-sm refollow-single-btn" data-did="${item.did}" data-handle="${item.handle}" aria-label="Re-follow ${escapeHTML(item.displayName || item.handle)}">Re-follow</button>
+            <button class="btn btn-primary btn-sm refollow-single-btn" data-did="${safeDid}" data-handle="${safeHandle}" aria-label="Re-follow ${escapeHTML(item.displayName || item.handle)}">Re-follow</button>
           `
               : `
-            <button class="btn btn-secondary btn-sm unfollow-single-btn" data-did="${item.did}" data-handle="${item.handle}" aria-label="Unfollow ${escapeHTML(item.displayName || item.handle)}">Unfollow</button>
+            <button class="btn btn-secondary btn-sm unfollow-single-btn" data-did="${safeDid}" data-handle="${safeHandle}" aria-label="Unfollow ${escapeHTML(item.displayName || item.handle)}">Unfollow</button>
           `
           }
         </td>
@@ -1052,13 +879,14 @@ function renderDashboard(resetSelection = true) {
 }
 
 function renderCheckboxHeaders(pageItems) {
-  if (pageItems.length === 0) {
+  const selectableItems = pageItems.filter((item) => Boolean(item.followingUri));
+  if (selectableItems.length === 0) {
     selectAllCheckbox.checked = false;
     selectAllCheckbox.disabled = true;
     return;
   }
   selectAllCheckbox.disabled = false;
-  const allPageDidsSelected = pageItems.every((item) => state.selectedDids.has(item.did));
+  const allPageDidsSelected = selectableItems.every((item) => state.selectedDids.has(item.did));
   selectAllCheckbox.checked = allPageDidsSelected;
 }
 
@@ -1066,12 +894,12 @@ function handleSelectAllToggle(e) {
   const list = getFilteredAndSortedList();
   const startIdx = (state.pagination.currentPage - 1) * state.pagination.pageSize;
   const endIdx = Math.min(startIdx + state.pagination.pageSize, list.length);
-  const pageItems = list.slice(startIdx, endIdx);
+  const selectableItems = list.slice(startIdx, endIdx).filter((item) => Boolean(item.followingUri));
 
   if (e.target.checked) {
-    pageItems.forEach((item) => state.selectedDids.add(item.did));
+    selectableItems.forEach((item) => state.selectedDids.add(item.did));
   } else {
-    pageItems.forEach((item) => state.selectedDids.delete(item.did));
+    selectableItems.forEach((item) => state.selectedDids.delete(item.did));
   }
   renderDashboard(false);
 }
@@ -1079,6 +907,9 @@ function handleSelectAllToggle(e) {
 function updateSelectedCounter() {
   const count = state.selectedDids.size;
   selectedCountSpan.textContent = count;
+  if (!batchUnfollowBtn.contains(selectedCountSpan)) {
+    batchUnfollowBtn.replaceChildren('Unfollow Selected (', selectedCountSpan, ')');
+  }
   if (count > 0) {
     batchUnfollowBtn.classList.remove('hidden');
     batchUnfollowBtn.disabled = false;
@@ -1123,7 +954,6 @@ async function executeUnfollow(dids, buttonEl) {
       buttonEl.textContent = 'Unfollow';
     }
   } finally {
-    batchUnfollowBtn.textContent = 'Unfollow Selected';
     updateSelectedCounter();
   }
 }
@@ -1258,28 +1088,6 @@ function formatRelativeDate(dateStr) {
 
   const date = new Date(dateStr);
   return date.toLocaleDateString(undefined, { year: '2-digit', month: 'short', day: 'numeric' });
-}
-
-function escapeHTML(str) {
-  if (!str) return '';
-  return str.replace(
-    /[&<>'"]/g,
-    (tag) =>
-      ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        "'": '&#39;',
-        '"': '&quot;',
-      })[tag] || tag,
-  );
-}
-
-function truncateText(text, maxLength) {
-  if (!text) return '';
-  if (text.length <= maxLength) return escapeHTML(text);
-  const truncated = text.substring(0, maxLength - 3) + '...';
-  return `<abbr title="${escapeHTML(text)}" style="text-decoration: none; cursor: help; border-bottom: none;">${escapeHTML(truncated)}</abbr>`;
 }
 
 function formatLastSynced(timestamp) {
