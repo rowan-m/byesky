@@ -6,6 +6,7 @@ import {
   escapeHTML,
   sanitizeUrl,
   truncateText,
+  isUserNeverPosted,
   isUserInactive,
   isUserNoisy,
   isUserMassFollower,
@@ -16,6 +17,7 @@ import {
 const defaultWeights = {
   notFollowing: 1,
   inactive: 4,
+  neverPosted: 4,
   noInbound: 1,
   noOutbound: 5,
   deletedBanned: 4,
@@ -39,6 +41,7 @@ const defaultFilters = {
   ok: true,
   notFollowing: true,
   inactive: true,
+  neverPosted: true,
   noInbound: true,
   noOutbound: true,
   deletedBanned: true,
@@ -110,13 +113,44 @@ test('Scoring & Sanitization Helpers', async (t) => {
       const deletedScore = calculateScore(deletedAccount, defaultWeights, defaultParams, now);
       const lurkerScore = calculateScore(activeLurker, defaultWeights, defaultParams, now);
 
-      // Deleted account gets deletedBanned(4) + notFollowing(1) + inactive(4) + noInbound(1) + noOutbound(5) = 15
+      // Deleted account gets deletedBanned(4) + notFollowing(1) + neverPosted(4) + noInbound(1) + noOutbound(5) = 15
       assert.strictEqual(deletedScore, 15);
       // Active lurker gets notFollowing(1) + noInbound(1) + noOutbound(5) = 7
       assert.strictEqual(lurkerScore, 7);
       assert.ok(deletedScore > lurkerScore);
     },
   );
+
+  await t.test('scores neverPosted and inactive accounts distinctly without overlap', () => {
+    const now = Date.now();
+    const neverPostedAccount = {
+      did: 'did:plc:never',
+      criteria: {
+        isFollowingUser: true,
+        lastPostDate: null,
+        hasLikedUser: true,
+        userContactedThem: true,
+      },
+    };
+    const inactiveAccount = {
+      did: 'did:plc:inactive',
+      criteria: {
+        isFollowingUser: true,
+        lastPostDate: new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString(),
+        hasLikedUser: true,
+        userContactedThem: true,
+      },
+    };
+
+    assert.strictEqual(isUserNeverPosted(neverPostedAccount), true);
+    assert.strictEqual(isUserInactive(neverPostedAccount, 180, now), false);
+    assert.strictEqual(isUserNeverPosted(inactiveAccount), false);
+    assert.strictEqual(isUserInactive(inactiveAccount, 180, now), true);
+
+    const customWeights = { ...defaultWeights, inactive: 2, neverPosted: 5 };
+    assert.strictEqual(calculateScore(neverPostedAccount, customWeights, defaultParams, now), 5);
+    assert.strictEqual(calculateScore(inactiveAccount, customWeights, defaultParams, now), 2);
+  });
 
   await t.test('filterAndSortFollowings filters and sorts accurately by score descending', () => {
     const now = Date.now();

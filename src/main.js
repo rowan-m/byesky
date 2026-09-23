@@ -42,6 +42,7 @@ let state = {
   weights: {
     notFollowing: 1,
     inactive: 4,
+    neverPosted: 4,
     noInbound: 1,
     noOutbound: 5,
     deletedBanned: 4,
@@ -58,6 +59,7 @@ let state = {
     locked: true,
     notFollowing: true,
     inactive: true,
+    neverPosted: true,
     noInbound: true,
     noOutbound: true,
     deletedBanned: true,
@@ -165,6 +167,7 @@ function setupEventListeners() {
   const weights = [
     'not-following',
     'inactive',
+    'never-posted',
     'no-inbound',
     'no-outbound',
     'deleted-banned',
@@ -197,6 +200,7 @@ function setupEventListeners() {
     { id: 'filter-locked', key: 'locked' },
     { id: 'filter-not-following', key: 'notFollowing' },
     { id: 'filter-inactive', key: 'inactive' },
+    { id: 'filter-never-posted', key: 'neverPosted' },
     { id: 'filter-no-inbound', key: 'noInbound' },
     { id: 'filter-no-outbound', key: 'noOutbound' },
     { id: 'filter-deleted-banned', key: 'deletedBanned' },
@@ -361,6 +365,8 @@ function initializeStateFromDOM() {
   state.weights.notFollowing =
     parseInt(document.getElementById('weight-not-following').value, 10) || 1;
   state.weights.inactive = parseInt(document.getElementById('weight-inactive').value, 10) || 4;
+  state.weights.neverPosted =
+    parseInt(document.getElementById('weight-never-posted').value, 10) || 4;
   state.weights.noInbound = parseInt(document.getElementById('weight-no-inbound').value, 10) || 1;
   state.weights.noOutbound = parseInt(document.getElementById('weight-no-outbound').value, 10) || 5;
   state.weights.deletedBanned =
@@ -379,6 +385,7 @@ function initializeStateFromDOM() {
   state.filters.locked = document.getElementById('filter-locked').checked;
   state.filters.notFollowing = document.getElementById('filter-not-following').checked;
   state.filters.inactive = document.getElementById('filter-inactive').checked;
+  state.filters.neverPosted = document.getElementById('filter-never-posted').checked;
   state.filters.noInbound = document.getElementById('filter-no-inbound').checked;
   state.filters.noOutbound = document.getElementById('filter-no-outbound').checked;
   state.filters.deletedBanned = document.getElementById('filter-deleted-banned').checked;
@@ -645,7 +652,10 @@ function renderDashboard(resetSelection = true) {
         badgesHTML +=
           '<span class="badge badge-danger" title="This account is blocking you or blocked by you">BLOCK</span>';
       }
-      if (item.dynamicInactive) {
+      if (item.neverPosted) {
+        badgesHTML +=
+          '<span class="badge badge-warning" title="Never Posted: This account has no posts on Bluesky">NEVER POSTED</span>';
+      } else if (item.dynamicInactive) {
         badgesHTML += `<span class="badge badge-warning" title="Inactive: has not posted in the last ${state.params.inactiveDays} days">INACTIVE</span>`;
       }
       if (!item.criteria.isFollowingUser) {
@@ -664,7 +674,7 @@ function renderDashboard(resetSelection = true) {
       let warningsCount = 0;
       if (item.criteria.isDeleted || item.criteria.isBanned) warningsCount++;
       if (item.criteria.isBlocking || item.criteria.isBlocked) warningsCount++;
-      if (item.dynamicInactive) warningsCount++;
+      if (item.neverPosted || item.dynamicInactive) warningsCount++;
       if (!item.criteria.isFollowingUser) warningsCount++;
 
       if (!hasInbound) {
@@ -763,7 +773,7 @@ function renderDashboard(resetSelection = true) {
       }
 
       const isLowFollowers = item.criteria.followersCount < state.params.lowFollowersThreshold;
-      const isPostInactive = item.dynamicInactive;
+      const isPostInactive = item.neverPosted || item.dynamicInactive;
 
       let isInteractionInactive = true;
       const lastInteractionDate = item.criteria.lastInteraction?.date || item.criteria.lastLikeDate;

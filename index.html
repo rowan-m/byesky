@@ -113,10 +113,18 @@
 
               <div class="slider-control">
                 <div class="slider-labels">
-                  <label for="weight-inactive">Inactive (No posts)</label>
+                  <label for="weight-inactive">Inactive (No recent posts)</label>
                   <span id="val-inactive">4</span>
                 </div>
                 <input type="range" id="weight-inactive" min="0" max="5" value="4" />
+              </div>
+
+              <div class="slider-control">
+                <div class="slider-labels">
+                  <label for="weight-never-posted">Never Posted (No content)</label>
+                  <span id="val-never-posted">4</span>
+                </div>
+                <input type="range" id="weight-never-posted" min="0" max="5" value="4" />
               </div>
 
               <div class="slider-control">
@@ -231,6 +239,11 @@
                 <label for="param-inactive-days">Inactive after (days):</label>
                 <input type="number" id="param-inactive-days" value="180" min="7" max="730" />
               </div>
+
+              <label class="checkbox-control">
+                <input type="checkbox" id="filter-never-posted" checked />
+                <span>Never Posted</span>
+              </label>
 
               <label class="checkbox-control">
                 <input type="checkbox" id="filter-muted" checked />

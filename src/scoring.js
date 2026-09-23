@@ -68,13 +68,17 @@ export function truncateText(text, maxLength) {
   return `<abbr title="${escapeHTML(text)}" style="text-decoration: none; cursor: help; border-bottom: none;">${escapeHTML(truncated)}</abbr>`;
 }
 
+export function isUserNeverPosted(item) {
+  return !item.criteria?.lastPostDate;
+}
+
 export function isUserInactive(item, inactiveDays = 180, now = Date.now()) {
-  if (item.criteria.lastPostDate) {
+  if (item.criteria?.lastPostDate) {
     const lastPost = new Date(item.criteria.lastPostDate).getTime();
     const daysSincePost = (now - lastPost) / (1000 * 60 * 60 * 24);
     return daysSincePost > inactiveDays;
   }
-  return true; // Never posted/no postsCount
+  return false; // Accounts with no posts are handled distinctly by isUserNeverPosted
 }
 
 export function isUserNoisy(item, noisyPostsThreshold = 20) {
@@ -104,7 +108,9 @@ export function calculateScore(item, weights, params, now = Date.now()) {
     score += weights.notFollowing;
   }
 
-  if (isUserInactive(item, params.inactiveDays, now)) {
+  if (isUserNeverPosted(item)) {
+    score += weights.neverPosted !== undefined ? weights.neverPosted : weights.inactive;
+  } else if (isUserInactive(item, params.inactiveDays, now)) {
     score += weights.inactive;
   }
 
@@ -166,13 +172,15 @@ export function filterAndSortFollowings(
     lockedSet = new Set(lockedDids);
   }
   const showLocked = filters.locked !== undefined ? filters.locked : true;
+  const showNeverPosted = filters.neverPosted !== undefined ? filters.neverPosted : true;
 
   return followings
     .map((item) => {
       const score = calculateScore(item, weights, params, now);
+      const neverPosted = isUserNeverPosted(item);
       const dynamicInactive = isUserInactive(item, params.inactiveDays, now);
       const isLocked = lockedSet.has(item.did);
-      return { ...item, score, dynamicInactive, isLocked };
+      return { ...item, score, neverPosted, dynamicInactive, isLocked };
     })
     .filter((item) => {
       // Search
@@ -200,6 +208,7 @@ export function filterAndSortFollowings(
 
       const criteriaMatches = {
         notFollowing: !item.criteria.isFollowingUser,
+        neverPosted: item.neverPosted,
         inactive: item.dynamicInactive,
         noInbound: !hasInbound,
         noOutbound: !hasOutbound,
@@ -217,6 +226,7 @@ export function filterAndSortFollowings(
       // Account has "OK" status if it has none of the warning/inactive flags
       const isOk =
         !criteriaMatches.notFollowing &&
+        !criteriaMatches.neverPosted &&
         !criteriaMatches.inactive &&
         !criteriaMatches.noInbound &&
         !criteriaMatches.noOutbound &&
@@ -235,6 +245,7 @@ export function filterAndSortFollowings(
 
       if (isOk && filters.ok) matchesFilter = true;
       if (criteriaMatches.notFollowing && filters.notFollowing) matchesFilter = true;
+      if (criteriaMatches.neverPosted && showNeverPosted) matchesFilter = true;
       if (criteriaMatches.inactive && filters.inactive) matchesFilter = true;
       if (criteriaMatches.noInbound && filters.noInbound) matchesFilter = true;
       if (criteriaMatches.noOutbound && filters.noOutbound) matchesFilter = true;
