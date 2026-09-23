@@ -1,5 +1,11 @@
 import { Agent } from '@atproto/api';
-import { initOAuthClient, startBackgroundSync, batchUnfollow, followUser } from './atproto.js';
+import {
+  initOAuthClient,
+  startBackgroundSync,
+  batchUnfollow,
+  followUser,
+  fetchAccountPreview,
+} from './atproto.js';
 import { syncCache } from './cache.js';
 import {
   isUserNoisy,
@@ -113,6 +119,12 @@ const modalTitle = document.getElementById('modal-title');
 const modalDesc = document.getElementById('modal-desc');
 const modalCancelBtn = document.getElementById('modal-cancel-btn');
 const modalConfirmBtn = document.getElementById('modal-confirm-btn');
+
+// Singleton Rich Hover Preview Card
+const hoverCard = document.getElementById('profile-hover-card');
+let hoverShowTimeout = null;
+let hoverHideTimeout = null;
+let activeHoverDid = null;
 
 // --- Initialization ---
 window.addEventListener('DOMContentLoaded', async () => {
@@ -326,6 +338,23 @@ function setupEventListeners() {
   // Cancel and Retry Sync buttons
   cancelSyncBtn.addEventListener('click', handleCancelSync);
   retrySyncBtn.addEventListener('click', handleRetrySync);
+
+  // Keep singleton hover card visible when hovered directly
+  if (hoverCard) {
+    hoverCard.addEventListener('mouseenter', () => {
+      clearTimeout(hoverHideTimeout);
+    });
+    hoverCard.addEventListener('mouseleave', () => {
+      scheduleHideHoverCard();
+    });
+  }
+  window.addEventListener(
+    'scroll',
+    () => {
+      hideHoverCardImmediately();
+    },
+    { passive: true },
+  );
 }
 
 function initializeStateFromDOM() {
@@ -871,6 +900,21 @@ function renderDashboard(resetSelection = true) {
         });
       }
 
+      const profileCell = row.querySelector('.profile-cell');
+      if (profileCell && hoverCard) {
+        profileCell.addEventListener('mouseenter', () => {
+          clearTimeout(hoverHideTimeout);
+          clearTimeout(hoverShowTimeout);
+          hoverShowTimeout = setTimeout(() => {
+            showHoverCard(item, profileCell);
+          }, 180);
+        });
+        profileCell.addEventListener('mouseleave', () => {
+          clearTimeout(hoverShowTimeout);
+          scheduleHideHoverCard();
+        });
+      }
+
       tableBody.appendChild(row);
     });
   }
@@ -1159,4 +1203,214 @@ function formatLastSynced(timestamp) {
       minute: '2-digit',
     })
   );
+}
+
+// --- Singleton Rich Hover Card Logic ---
+function scheduleHideHoverCard() {
+  clearTimeout(hoverHideTimeout);
+  hoverHideTimeout = setTimeout(() => {
+    hideHoverCardImmediately();
+  }, 150);
+}
+
+function hideHoverCardImmediately() {
+  clearTimeout(hoverShowTimeout);
+  clearTimeout(hoverHideTimeout);
+  activeHoverDid = null;
+  if (hoverCard) {
+    hoverCard.classList.add('hidden');
+  }
+}
+
+function positionHoverCard(anchorEl) {
+  if (!hoverCard || !anchorEl) return;
+  const rect = anchorEl.getBoundingClientRect();
+  const cardWidth = 340;
+  const cardHeight = hoverCard.offsetHeight || 240;
+  const margin = 10;
+
+  // Prefer placing to the right of the profile cell; fallback to aligned left below/above
+  let left = rect.right + margin;
+  if (left + cardWidth > window.innerWidth - margin) {
+    left = Math.max(margin, rect.left);
+  }
+
+  let top = rect.top - 8;
+  if (top + cardHeight > window.innerHeight - margin) {
+    top = Math.max(margin, window.innerHeight - cardHeight - margin);
+  }
+
+  hoverCard.style.left = `${Math.round(left)}px`;
+  hoverCard.style.top = `${Math.round(top)}px`;
+}
+
+function renderHoverCardHTML(item, isHydrating = false) {
+  const defaultAvatar =
+    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 24 24' fill='%23cbd5e1'><circle cx='12' cy='12' r='12'/></svg>";
+  const avatarSrc = item.avatar ? sanitizeUrl(item.avatar, defaultAvatar) : defaultAvatar;
+  const safeName = escapeHTML(item.displayName || item.handle);
+  const safeHandle = escapeHTML(item.handle);
+  const profileUrl = `https://bsky.app/profile/${encodeURIComponent(item.handle)}`;
+
+  const followsBadge = item.criteria?.isFollowingUser
+    ? '<span class="badge badge-success">FOLLOWS YOU</span>'
+    : '<span class="badge badge-secondary">DOES NOT FOLLOW</span>';
+
+  const followersStr = (item.criteria?.followersCount || 0).toLocaleString();
+  const followsStr = (item.criteria?.followsCount || 0).toLocaleString();
+  const postsStr = (item.criteria?.postsCount || 0).toLocaleString();
+
+  // 1. Bio section
+  let bioHTML;
+  if (isHydrating && !item.description) {
+    bioHTML = '<div class="hover-card-bio empty">Loading profile details...</div>';
+  } else if (item.description && item.description.trim()) {
+    bioHTML = `<div class="hover-card-bio">${escapeHTML(item.description.trim())}</div>`;
+  } else {
+    bioHTML = '<div class="hover-card-bio empty">No bio provided</div>';
+  }
+
+  // 2. Common Followers (Mutuals) section
+  const mutualsCount = item.criteria?.mutualsCount || 0;
+  const mutualsList = item.preview?.mutuals || [];
+  let mutualsHTML;
+  if (mutualsCount > 0 || mutualsList.length > 0) {
+    const avatarsHTML = mutualsList
+      .slice(0, 4)
+      .map((m) => {
+        const mAvatar = m.avatar ? sanitizeUrl(m.avatar, defaultAvatar) : defaultAvatar;
+        return `<img src="${mAvatar}" alt="${escapeHTML(m.handle)}" loading="lazy">`;
+      })
+      .join('');
+
+    const names = mutualsList.slice(0, 2).map((m) => `@${escapeHTML(m.handle)}`);
+    const extraCount = Math.max(0, mutualsCount - names.length);
+    let summaryText;
+    if (names.length > 0) {
+      summaryText = `Followed by ${names.join(', ')}`;
+      if (extraCount > 0) {
+        summaryText += ` + ${extraCount} other${extraCount > 1 ? 's' : ''} you follow`;
+      }
+    } else {
+      summaryText = `Followed by ${mutualsCount} account${mutualsCount > 1 ? 's' : ''} you follow`;
+    }
+
+    mutualsHTML = `
+      <div class="hover-card-section">
+        <div class="hover-card-section-label">
+          <span>Common Followers</span>
+          <span>${mutualsCount} mutual${mutualsCount === 1 ? '' : 's'}</span>
+        </div>
+        <div class="hover-card-mutuals">
+          ${avatarsHTML ? `<div class="hover-card-mutual-avatars">${avatarsHTML}</div>` : ''}
+          <span>${summaryText}</span>
+        </div>
+      </div>
+    `;
+  } else {
+    mutualsHTML = `
+      <div class="hover-card-section">
+        <div class="hover-card-section-label"><span>Common Followers</span><span>0 mutuals</span></div>
+        <div class="hover-card-mutuals"><span>No mutual followers in common</span></div>
+      </div>
+    `;
+  }
+
+  // 3. Most Recent Post section
+  const lastPost = item.preview?.lastPost;
+  const lastPostDateStr = escapeHTML(
+    formatRelativeDate(lastPost?.date || item.criteria?.lastPostDate),
+  );
+  let postHTML;
+  if (lastPost && lastPost.text) {
+    const safePostUrl = sanitizeUrl(lastPost.uri, profileUrl);
+    const likes = (lastPost.likeCount || 0).toLocaleString();
+    const reposts = (lastPost.repostCount || 0).toLocaleString();
+    postHTML = `
+      <div class="hover-card-section">
+        <div class="hover-card-section-label">
+          <span>Most Recent Post</span>
+          <span>${lastPostDateStr}</span>
+        </div>
+        <div class="hover-card-post">
+          <div class="hover-card-post-text">${escapeHTML(lastPost.text)}</div>
+          <div class="hover-card-post-meta">
+            <span>♥ ${likes} · ↻ ${reposts}</span>
+            <a href="${safePostUrl}" target="_blank" rel="noopener noreferrer">View post ↗</a>
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (item.criteria?.lastPostDate) {
+    postHTML = `
+      <div class="hover-card-section">
+        <div class="hover-card-section-label">
+          <span>Most Recent Post</span>
+          <span>${lastPostDateStr}</span>
+        </div>
+        <div class="hover-card-post-meta">
+          <span>${isHydrating ? 'Fetching post snippet...' : 'Media/repost or no text content'}</span>
+          <a href="${profileUrl}" target="_blank" rel="noopener noreferrer">View feed ↗</a>
+        </div>
+      </div>
+    `;
+  } else {
+    postHTML = `
+      <div class="hover-card-section">
+        <div class="hover-card-section-label"><span>Most Recent Post</span><span>Never</span></div>
+        <div class="hover-card-mutuals"><span>No public posts found</span></div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="hover-card-header">
+      <img class="hover-card-avatar" src="${avatarSrc}" alt="${safeHandle}">
+      <div class="hover-card-identity">
+        <div class="hover-card-name-row">
+          <a href="${profileUrl}" target="_blank" rel="noopener noreferrer" class="hover-card-name">${safeName}</a>
+          ${followsBadge}
+        </div>
+        <span class="hover-card-handle">@${safeHandle}</span>
+      </div>
+    </div>
+    <div class="hover-card-stats">
+      <span><strong>${followersStr}</strong> Followers</span>
+      <span><strong>${followsStr}</strong> Following</span>
+      <span><strong>${postsStr}</strong> Posts</span>
+    </div>
+    ${bioHTML}
+    ${mutualsHTML}
+    ${postHTML}
+  `;
+}
+
+async function showHoverCard(item, anchorEl) {
+  if (!hoverCard) return;
+  activeHoverDid = item.did;
+
+  const rawItem = state.followings.find((f) => f.did === item.did) || item;
+  const needsHydration =
+    rawItem.description === undefined &&
+    (!rawItem.preview ||
+      (!rawItem.preview.lastPost &&
+        (!rawItem.preview.mutuals || rawItem.preview.mutuals.length === 0)));
+
+  hoverCard.innerHTML = renderHoverCardHTML(rawItem, needsHydration);
+  hoverCard.classList.remove('hidden');
+  positionHoverCard(anchorEl);
+
+  if (needsHydration && state.agent && state.user) {
+    try {
+      const enriched = await fetchAccountPreview(state.agent, state.user.did, rawItem.did);
+      rawItem.description = enriched.description;
+      rawItem.preview = enriched.preview;
+      if (activeHoverDid === rawItem.did && !hoverCard.classList.contains('hidden')) {
+        hoverCard.innerHTML = renderHoverCardHTML(rawItem, false);
+        positionHoverCard(anchorEl);
+      }
+    } catch (err) {
+      console.warn('Could not lazily hydrate hover preview:', err);
+    }
+  }
 }

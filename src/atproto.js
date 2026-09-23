@@ -224,8 +224,13 @@ async function runSync(agent, userDid, onUpdate) {
       did: f.did,
       handle: f.handle,
       displayName: f.displayName || '',
+      description: (f.description || '').slice(0, 300),
       avatar: f.avatar || '',
       followingUri: f.viewer?.following || null,
+      preview: {
+        mutuals: [],
+        lastPost: null,
+      },
       criteria: {
         isDeleted: false,
         isBanned: false,
@@ -568,6 +573,7 @@ async function runSync(agent, userDid, onUpdate) {
         for (const f of batch) {
           const p = profilesMap.get(f.did);
           if (p) {
+            f.description = (p.description || f.description || '').slice(0, 300);
             f.criteria.followersCount = p.followersCount || 0;
             f.criteria.followsCount = p.followsCount || 0;
             f.criteria.postsCount = p.postsCount || 0;
@@ -641,7 +647,16 @@ async function runSync(agent, userDid, onUpdate) {
           const posts = feedRes.data.feed || [];
           if (posts.length > 0) {
             const lastPost = posts[0].post;
-            f.criteria.lastPostDate = lastPost.indexedAt || lastPost.record?.createdAt || null;
+            const lastPostDate = lastPost.indexedAt || lastPost.record?.createdAt || null;
+            f.criteria.lastPostDate = lastPostDate;
+            f.preview = f.preview || { mutuals: [], lastPost: null };
+            f.preview.lastPost = {
+              text: (lastPost.record?.text || '').slice(0, 280),
+              uri: atUriToBskyUrl(lastPost.uri),
+              date: lastPostDate,
+              likeCount: lastPost.likeCount || 0,
+              repostCount: lastPost.repostCount || 0,
+            };
 
             // Count posts/reposts in the last 7 days
             const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -692,6 +707,13 @@ async function runSync(agent, userDid, onUpdate) {
         const mutuals = mutualsRes.data.followers || [];
         f.criteria.mutualsCount = mutuals.length;
         f.criteria.isOutlier = mutuals.length === 0;
+        f.preview = f.preview || { mutuals: [], lastPost: null };
+        f.preview.mutuals = mutuals.slice(0, 5).map((m) => ({
+          did: m.did,
+          handle: m.handle,
+          displayName: m.displayName || m.handle,
+          avatar: m.avatar || '',
+        }));
       } catch (err) {
         if (err.message === 'Sync cancelled') throw err;
         console.warn(
@@ -858,4 +880,68 @@ export async function followUser(agent, userDid, targetDid, onUpdate) {
   if (onUpdate) onUpdate();
 
   return { did: targetDid, followingUri: response.uri };
+}
+
+/**
+ * Lazily hydrates a single account's preview data (bio, common followers, most recent post)
+ * if hovering an account from an older cache before a full resync.
+ */
+export async function fetchAccountPreview(agent, userDid, targetDid) {
+  const appViewAgent = new Agent({
+    service: 'https://api.bsky.app',
+    session: agent.sessionManager,
+  });
+
+  const [profileRes, feedRes, mutualsRes] = await Promise.allSettled([
+    appViewAgent.api.app.bsky.actor.getProfile({ actor: targetDid }),
+    appViewAgent.api.app.bsky.feed.getAuthorFeed({
+      actor: targetDid,
+      limit: 1,
+      filter: 'posts_no_replies',
+    }),
+    agent.api.app.bsky.graph.getKnownFollowers({
+      actor: targetDid,
+      limit: 5,
+    }),
+  ]);
+
+  const description =
+    profileRes.status === 'fulfilled'
+      ? (profileRes.value.data?.description || '').slice(0, 300)
+      : '';
+
+  let lastPost = null;
+  if (feedRes.status === 'fulfilled') {
+    const firstItem = feedRes.value.data?.feed?.[0]?.post;
+    if (firstItem) {
+      lastPost = {
+        text: (firstItem.record?.text || '').slice(0, 280),
+        uri: atUriToBskyUrl(firstItem.uri),
+        date: firstItem.indexedAt || firstItem.record?.createdAt || null,
+        likeCount: firstItem.likeCount || 0,
+        repostCount: firstItem.repostCount || 0,
+      };
+    }
+  }
+
+  let mutuals = [];
+  if (mutualsRes.status === 'fulfilled') {
+    const rawMutuals = mutualsRes.value.data?.followers || [];
+    mutuals = rawMutuals.slice(0, 5).map((m) => ({
+      did: m.did,
+      handle: m.handle,
+      displayName: m.displayName || m.handle,
+      avatar: m.avatar || '',
+    }));
+  }
+
+  const cached = await syncCache.get(userDid);
+  const target = cached.followings.find((item) => item.did === targetDid);
+  if (target) {
+    target.description = description;
+    target.preview = { mutuals, lastPost };
+    await syncCache.set(userDid, { followings: cached.followings });
+  }
+
+  return { description, preview: { mutuals, lastPost } };
 }

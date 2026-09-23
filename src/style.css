@@ -890,3 +890,199 @@ tr.unfollowed-row td {
     transform: rotate(360deg);
   }
 }
+
+/* Rich Hover Preview Card */
+.hover-card {
+  position: fixed;
+  z-index: 900;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  padding: 12px 14px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  box-shadow:
+    0 10px 25px -5px rgba(0, 0, 0, 0.16),
+    0 4px 10px -3px rgba(0, 0, 0, 0.08);
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  margin-bottom: 0;
+  pointer-events: auto;
+}
+
+.hover-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.hover-card-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--border-radius);
+  object-fit: cover;
+  border: 1px solid var(--border-color);
+  background-color: var(--border-color);
+  flex-shrink: 0;
+}
+
+.hover-card-identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.hover-card-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.hover-card-name {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hover-card-name:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.hover-card-handle {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hover-card-stats {
+  display: flex;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.hover-card-stats strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.hover-card-bio {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 8px;
+  max-height: 88px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.hover-card-bio.empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.hover-card-section {
+  border-top: 1px solid var(--border-color);
+  padding-top: 7px;
+  margin-top: 7px;
+}
+
+.hover-card-section-label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.hover-card-mutuals {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.hover-card-mutual-avatars {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.hover-card-mutual-avatars img {
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
+  object-fit: cover;
+  border: 1px solid var(--bg-card);
+  margin-left: -4px;
+  background-color: var(--border-color);
+}
+
+.hover-card-mutual-avatars img:first-child {
+  margin-left: 0;
+}
+
+.hover-card-post {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 6px 8px;
+  font-size: 0.75rem;
+  line-height: 1.38;
+  color: var(--text-primary);
+}
+
+.hover-card-post-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 66px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  margin-bottom: 4px;
+}
+
+.hover-card-post-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.hover-card-post-meta a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.hover-card-post-meta a:hover {
+  text-decoration: underline;
+}
