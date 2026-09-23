@@ -41,7 +41,7 @@ let state = {
   searchQuery: '',
   weights: {
     notFollowing: 1,
-    inactive: 4,
+    inactive: 3,
     neverPosted: 4,
     noInbound: 1,
     noOutbound: 5,
@@ -364,7 +364,7 @@ function setupEventListeners() {
 function initializeStateFromDOM() {
   state.weights.notFollowing =
     parseInt(document.getElementById('weight-not-following').value, 10) || 1;
-  state.weights.inactive = parseInt(document.getElementById('weight-inactive').value, 10) || 4;
+  state.weights.inactive = parseInt(document.getElementById('weight-inactive').value, 10) || 3;
   state.weights.neverPosted =
     parseInt(document.getElementById('weight-never-posted').value, 10) || 4;
   state.weights.noInbound = parseInt(document.getElementById('weight-no-inbound').value, 10) || 1;

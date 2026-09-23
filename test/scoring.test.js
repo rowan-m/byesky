@@ -16,7 +16,7 @@ import {
 
 const defaultWeights = {
   notFollowing: 1,
-  inactive: 4,
+  inactive: 3,
   neverPosted: 4,
   noInbound: 1,
   noOutbound: 5,
