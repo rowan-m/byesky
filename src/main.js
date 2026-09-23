@@ -724,7 +724,9 @@ function renderDashboard(resetSelection = true) {
           '<span class="badge badge-warning" title="Social Outlier: Has 0 mutual follows in common with you on Bluesky">0 MUTUALS</span>';
         warningsCount++;
       } else if (item.criteria.mutualsCount > 0) {
-        badgesHTML += `<span class="badge badge-success" title="Mutual Social Graph: Has ${escapeHTML(item.criteria.mutualsCount)} mutual follows in common with you on Bluesky">${escapeHTML(item.criteria.mutualsCount)} MUTUALS</span>`;
+        const mutualsLabel = formatMutualsCount(item.criteria);
+        const mutualWord = item.criteria.mutualsCount === 1 ? 'MUTUAL' : 'MUTUALS';
+        badgesHTML += `<span class="badge badge-success" title="Mutual Social Graph: Has ${escapeHTML(mutualsLabel)} mutual follow${item.criteria.mutualsCount === 1 ? '' : 's'} in common with you on Bluesky">${escapeHTML(mutualsLabel)} ${mutualWord}</span>`;
       }
 
       if (warningsCount === 0) {
@@ -1244,6 +1246,12 @@ function positionHoverCard(anchorEl) {
   hoverCard.style.top = `${Math.round(top)}px`;
 }
 
+function formatMutualsCount(criteria) {
+  const count = criteria?.mutualsCount || 0;
+  const isTenPlus = count > 10 || (count === 10 && criteria?.hasMoreMutuals !== false);
+  return isTenPlus ? '10+' : `${count}`;
+}
+
 function renderHoverCardHTML(item, isHydrating = false) {
   const defaultAvatar =
     "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 24 24' fill='%23cbd5e1'><circle cx='12' cy='12' r='12'/></svg>";
@@ -1272,6 +1280,8 @@ function renderHoverCardHTML(item, isHydrating = false) {
 
   // 2. Common Followers (Mutuals) section
   const mutualsCount = item.criteria?.mutualsCount || 0;
+  const mutualsLabel = formatMutualsCount(item.criteria);
+  const isTenPlus = mutualsLabel === '10+';
   const mutualsList = item.preview?.mutuals || [];
   let mutualsHTML;
   if (mutualsCount > 0 || mutualsList.length > 0) {
@@ -1284,22 +1294,24 @@ function renderHoverCardHTML(item, isHydrating = false) {
       .join('');
 
     const names = mutualsList.slice(0, 2).map((m) => `@${escapeHTML(m.handle)}`);
-    const extraCount = Math.max(0, mutualsCount - names.length);
+    const baseCount = Math.min(mutualsCount, 10);
+    const extraCount = Math.max(0, baseCount - names.length);
+    const extraSuffix = isTenPlus ? '+' : '';
     let summaryText;
     if (names.length > 0) {
       summaryText = `Followed by ${names.join(', ')}`;
       if (extraCount > 0) {
-        summaryText += ` + ${extraCount} other${extraCount > 1 ? 's' : ''} you follow`;
+        summaryText += ` + ${extraCount}${extraSuffix} other${extraCount > 1 ? 's' : ''} you follow`;
       }
     } else {
-      summaryText = `Followed by ${mutualsCount} account${mutualsCount > 1 ? 's' : ''} you follow`;
+      summaryText = `Followed by ${mutualsLabel} account${mutualsCount === 1 ? '' : 's'} you follow`;
     }
 
     mutualsHTML = `
       <div class="hover-card-section">
         <div class="hover-card-section-label">
           <span>Common Followers</span>
-          <span>${mutualsCount} mutual${mutualsCount === 1 ? '' : 's'}</span>
+          <span>${mutualsLabel} mutual${mutualsCount === 1 ? '' : 's'}</span>
         </div>
         <div class="hover-card-mutuals">
           ${avatarsHTML ? `<div class="hover-card-mutual-avatars">${avatarsHTML}</div>` : ''}
@@ -1405,6 +1417,10 @@ async function showHoverCard(item, anchorEl) {
       const enriched = await fetchAccountPreview(state.agent, state.user.did, rawItem.did);
       rawItem.description = enriched.description;
       rawItem.preview = enriched.preview;
+      if (enriched.mutualsCount !== undefined && rawItem.criteria) {
+        rawItem.criteria.mutualsCount = enriched.mutualsCount;
+        rawItem.criteria.hasMoreMutuals = enriched.hasMoreMutuals;
+      }
       if (activeHoverDid === rawItem.did && !hoverCard.classList.contains('hidden')) {
         hoverCard.innerHTML = renderHoverCardHTML(rawItem, false);
         positionHoverCard(anchorEl);

@@ -700,12 +700,13 @@ async function runSync(agent, userDid, onUpdate) {
           () =>
             pdsAgent.api.app.bsky.graph.getKnownFollowers({
               actor: f.did,
-              limit: 10,
+              limit: 11,
             }),
           onUpdate,
         );
         const mutuals = mutualsRes.data.followers || [];
         f.criteria.mutualsCount = mutuals.length;
+        f.criteria.hasMoreMutuals = mutuals.length > 10;
         f.criteria.isOutlier = mutuals.length === 0;
         f.preview = f.preview || { mutuals: [], lastPost: null };
         f.preview.mutuals = mutuals.slice(0, 5).map((m) => ({
@@ -901,7 +902,7 @@ export async function fetchAccountPreview(agent, userDid, targetDid) {
     }),
     agent.api.app.bsky.graph.getKnownFollowers({
       actor: targetDid,
-      limit: 5,
+      limit: 11,
     }),
   ]);
 
@@ -925,8 +926,12 @@ export async function fetchAccountPreview(agent, userDid, targetDid) {
   }
 
   let mutuals = [];
+  let mutualsCount;
+  let hasMoreMutuals;
   if (mutualsRes.status === 'fulfilled') {
     const rawMutuals = mutualsRes.value.data?.followers || [];
+    mutualsCount = rawMutuals.length;
+    hasMoreMutuals = rawMutuals.length > 10;
     mutuals = rawMutuals.slice(0, 5).map((m) => ({
       did: m.did,
       handle: m.handle,
@@ -940,8 +945,12 @@ export async function fetchAccountPreview(agent, userDid, targetDid) {
   if (target) {
     target.description = description;
     target.preview = { mutuals, lastPost };
+    if (mutualsCount !== undefined && target.criteria) {
+      target.criteria.mutualsCount = mutualsCount;
+      target.criteria.hasMoreMutuals = hasMoreMutuals;
+    }
     await syncCache.set(userDid, { followings: cached.followings });
   }
 
-  return { description, preview: { mutuals, lastPost } };
+  return { description, preview: { mutuals, lastPost }, mutualsCount, hasMoreMutuals };
 }
