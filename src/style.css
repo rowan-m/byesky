@@ -352,43 +352,158 @@ input[type='number']:focus {
   }
 }
 
-/* Sidebar Controls */
-.weights-group,
-.filters-group {
+/* Sidebar Controls (Unified Filter + Weight + Threshold) */
+.sidebar-header {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 6px;
+  margin-bottom: 8px;
 }
 
-.slider-control {
+.sidebar-header h3 {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+
+.sidebar-legend {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sidebar .section-desc {
+  font-size: 0.775rem;
+  margin-bottom: 10px;
+  line-height: 1.35;
+}
+
+.status-toggles-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.status-pill {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 5px 8px;
+  font-size: 0.775rem;
+}
+
+.criteria-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.slider-labels {
+.criteria-group-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-top: 8px;
+  margin-bottom: 2px;
+  padding-bottom: 2px;
+  border-bottom: 1px dashed var(--border-color);
+}
+
+.criteria-list > .criteria-group-title:first-child {
+  margin-top: 2px;
+}
+
+.criteria-item {
   display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px 4px;
+  border-radius: var(--border-radius);
+  transition: var(--transition);
+}
+
+.criteria-item:hover {
+  background-color: var(--bg-app);
+}
+
+.criteria-item.is-filtered-out {
+  opacity: 0.48;
+}
+
+.criteria-row {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
-  font-size: 0.825rem;
+  gap: 8px;
 }
 
-.slider-labels label {
+.criteria-row .checkbox-control {
   margin-bottom: 0;
-  font-weight: 500;
-  color: var(--text-secondary);
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
 }
 
-.slider-labels span {
+.criteria-row .checkbox-control span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.criteria-weight {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.criteria-weight input[type='range'] {
+  width: 68px;
+  margin: 0;
+}
+
+.weight-badge {
   font-family: var(--font-mono);
-  font-size: 0.825rem;
+  font-size: 0.75rem;
   font-weight: 700;
   color: var(--primary);
   background-color: var(--bg-app);
-  padding: 1px 4px;
+  padding: 1px 5px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
-  min-width: 18px;
+  min-width: 20px;
   text-align: center;
+  line-height: 1.2;
+}
+
+.criteria-param {
+  padding-left: 22px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.73rem;
+  color: var(--text-muted);
+}
+
+.criteria-param label {
+  font-size: 0.73rem;
+  font-weight: 500;
+  margin-bottom: 0;
+  color: var(--text-secondary);
+}
+
+.criteria-param input[type='number'] {
+  width: 58px;
+  padding: 1px 5px;
+  font-size: 0.73rem;
+  height: 22px;
 }
 
 /* Flat, Premium Custom Sliders */
@@ -422,7 +537,7 @@ input[type='range']::-webkit-slider-thumb:hover {
 .checkbox-control {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   cursor: pointer;
   font-size: 0.825rem;
   font-weight: 500;
@@ -436,26 +551,7 @@ input[type='range']::-webkit-slider-thumb:hover {
   height: 14px;
   border-radius: var(--border-radius);
   accent-color: var(--primary);
-}
-
-.nested-control {
-  padding-left: 22px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.nested-control label {
-  font-weight: 500;
-  margin-bottom: 0;
-}
-
-.nested-control input[type='number'] {
-  width: 60px;
-  padding: 2px 6px;
-  font-size: 0.75rem;
+  flex-shrink: 0;
 }
 
 /* Toolbar Controls */

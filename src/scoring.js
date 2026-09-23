@@ -157,6 +157,10 @@ export function calculateScore(item, weights, params, now = Date.now()) {
     score += weights.outlier;
   }
 
+  if (weights.lowFollowers && item.criteria.followersCount < (params.lowFollowersThreshold || 50)) {
+    score += weights.lowFollowers;
+  }
+
   return score;
 }
 

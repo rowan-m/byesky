@@ -47,6 +47,7 @@ let state = {
     noOutbound: 5,
     deletedBanned: 4,
     blocking: 4,
+    lowFollowers: 0,
     noisy: 1,
     muted: 4,
     massFollower: 1,
@@ -172,6 +173,7 @@ function setupEventListeners() {
     'no-outbound',
     'deleted-banned',
     'blocking',
+    'low-followers',
     'noisy',
     'muted',
     'mass-follower',
@@ -216,8 +218,15 @@ function setupEventListeners() {
 
   filterCheckboxes.forEach((f) => {
     const checkbox = document.getElementById(f.id);
+    const parentItem = checkbox.closest('.criteria-item');
+    if (parentItem) {
+      parentItem.classList.toggle('is-filtered-out', !checkbox.checked);
+    }
     checkbox.addEventListener('change', (e) => {
       state.filters[f.key] = e.target.checked;
+      if (parentItem) {
+        parentItem.classList.toggle('is-filtered-out', !e.target.checked);
+      }
       state.pagination.currentPage = 1; // Reset to page 1 on filter
       renderDashboard();
     });
@@ -372,6 +381,8 @@ function initializeStateFromDOM() {
   state.weights.deletedBanned =
     parseInt(document.getElementById('weight-deleted-banned').value, 10) || 4;
   state.weights.blocking = parseInt(document.getElementById('weight-blocking').value, 10) || 4;
+  state.weights.lowFollowers =
+    parseInt(document.getElementById('weight-low-followers')?.value ?? '0', 10) || 0;
   state.weights.noisy = parseInt(document.getElementById('weight-noisy').value, 10) || 1;
   state.weights.muted = parseInt(document.getElementById('weight-muted').value, 10) || 4;
   state.weights.massFollower =
