@@ -330,6 +330,33 @@ input[type='number']:focus {
   border: 1px solid var(--danger);
 }
 
+/* Missing-permission prompt (sessions granted before a scope was added) */
+.reauth-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--warning);
+  border-radius: var(--border-radius);
+  background-color: var(--warning-light);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.reauth-banner.hidden {
+  display: none;
+}
+
+.reauth-banner-text {
+  flex: 1 1 280px;
+}
+
+.reauth-banner-text strong {
+  margin-right: 4px;
+}
+
 /* Progress Section */
 .progress-container {
   margin-top: 16px;

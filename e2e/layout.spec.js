@@ -151,3 +151,39 @@ test('hover card shows on mouse hover', async ({ page, hasTouch }) => {
   await expect(page.locator('#profile-hover-card')).toBeVisible();
   await expect(page.locator('#profile-hover-card')).toContainText(/Bio for Account \d+/);
 });
+
+test.describe('session missing a newly required scope', () => {
+  test.beforeEach(async ({ page }) => {
+    // Re-register routes with an older grant that predates the chat scope.
+    await page.unrouteAll();
+    await mockSignedInApp(page, {
+      grantedScope: 'atproto transition:generic repo:app.bsky.graph.follow',
+    });
+    await page.goto('/');
+    await expect(page.locator('#table-body tr').first()).toBeVisible();
+  });
+
+  test('shows a re-auth prompt that starts sign-in', async ({ page }) => {
+    const banner = page.locator('#reauth-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('direct messages');
+
+    await page.locator('#reauth-btn').click();
+    await expect
+      .poll(() => page.evaluate(() => window.__signInCalls || []))
+      .toEqual(['e2e-user.bsky.social']);
+    expect(await page.evaluate(() => sessionStorage.getItem('byesky:resyncAfterReauth'))).toBe('1');
+  });
+});
+
+test('no re-auth prompt when all scopes are granted', async ({ page }) => {
+  await expect(page.locator('#reauth-banner')).toBeHidden();
+});
+
+test('returning from re-auth with all scopes starts a fresh sync', async ({ page }) => {
+  await page.evaluate(() => sessionStorage.setItem('byesky:resyncAfterReauth', '1'));
+  await page.reload();
+  await expect(page.locator('#sync-section')).toBeVisible();
+  await expect(page.locator('#reauth-banner')).toBeHidden();
+  expect(await page.evaluate(() => sessionStorage.getItem('byesky:resyncAfterReauth'))).toBeNull();
+});

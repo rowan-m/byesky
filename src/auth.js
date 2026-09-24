@@ -1,8 +1,7 @@
 // OAuth client setup only. Kept separate from atproto.js so the sign-in page doesn't
 // have to download @atproto/api (the bulk of the bundle) until a session exists.
 import { BrowserOAuthClient, atprotoLoopbackClientMetadata } from '@atproto/oauth-client-browser';
-
-const OAUTH_SCOPE = 'atproto transition:generic transition:chat.bsky repo:app.bsky.graph.follow';
+import { OAUTH_SCOPE } from './scopes.js';
 
 let oauthClient = null;
 

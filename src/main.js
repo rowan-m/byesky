@@ -1,4 +1,5 @@
 import { initOAuthClient } from './auth.js';
+import { getMissingScopes } from './scopes.js';
 import { syncCache } from './cache.js';
 import {
   isUserNoisy,
@@ -73,6 +74,7 @@ let state = {
     massFollowerThreshold: 3500,
   },
   pendingUnfollowDids: [], // Holds DIDs during confirmation modal
+  missingScopes: [], // Required OAuth scopes this session wasn't granted (see scopes.js)
 };
 
 // DOM Elements
@@ -180,6 +182,9 @@ function setupEventListeners() {
 
   // Logout Button
   logoutBtn.addEventListener('click', handleLogout);
+
+  // Re-authorise when the session is missing newly required scopes
+  document.getElementById('reauth-btn')?.addEventListener('click', handleReauth);
 
   // Resync Button
   resyncBtn.addEventListener('click', triggerSync);
@@ -699,7 +704,13 @@ async function checkSession() {
       };
 
       showUserSession(state.user.handle);
-      await checkSyncStatus();
+      const missingScopes = await checkGrantedScopes(result.session);
+      // Returning from "Sign in again": resync so the newly granted data is included.
+      if (consumeResyncAfterReauth() && missingScopes.length === 0) {
+        await triggerSync();
+      } else {
+        await checkSyncStatus();
+      }
     } else {
       setSessionHint(false);
       state.user = null;
@@ -709,6 +720,64 @@ async function checkSession() {
     console.error('Session check failed:', err);
     state.user = null;
     showAuthSection();
+  }
+}
+
+// --- Granted-scope check ---
+// Sessions authorised before the app added a scope keep their original grant until the
+// user signs in again, so check what was granted and prompt if anything is missing.
+const RESYNC_AFTER_REAUTH_KEY = 'byesky:resyncAfterReauth';
+
+async function checkGrantedScopes(session) {
+  let missing = [];
+  try {
+    const { scope } = await session.getTokenInfo(false);
+    missing = getMissingScopes(scope);
+  } catch (err) {
+    console.warn('Could not read granted OAuth scopes:', err);
+  }
+  state.missingScopes = missing;
+  renderReauthBanner();
+  return missing;
+}
+
+function renderReauthBanner(errorMessage = '') {
+  const banner = document.getElementById('reauth-banner');
+  const detail = document.getElementById('reauth-banner-detail');
+  if (!banner || !detail) return;
+
+  const missing = state.user ? state.missingScopes : [];
+  banner.classList.toggle('hidden', missing.length === 0);
+  if (missing.length === 0) return;
+
+  const purposes = missing.map(({ purpose }) => purpose).join(' and ');
+  detail.textContent =
+    errorMessage ||
+    `Sign in again to allow it to ${purposes}. Syncing still works, but results will be incomplete until you do.`;
+}
+
+function consumeResyncAfterReauth() {
+  try {
+    const pending = sessionStorage.getItem(RESYNC_AFTER_REAUTH_KEY) === '1';
+    sessionStorage.removeItem(RESYNC_AFTER_REAUTH_KEY);
+    return pending;
+  } catch {
+    return false;
+  }
+}
+
+async function handleReauth() {
+  if (!state.user) return;
+  try {
+    sessionStorage.setItem(RESYNC_AFTER_REAUTH_KEY, '1');
+  } catch {
+    // Without storage we just skip the automatic resync after returning.
+  }
+  try {
+    // Redirects to the user's PDS, which asks them to approve the full, current scope set.
+    await initOAuthClient().signIn(state.user.handle);
+  } catch (err) {
+    renderReauthBanner(`Couldn't start sign-in: ${err.message || err}. Please try again.`);
   }
 }
 
@@ -744,6 +813,8 @@ async function handleLogout() {
   state.user = null;
   state.session = null;
   state.agent = null;
+  state.missingScopes = [];
+  renderReauthBanner();
   state.followings = [];
   state.selectedDids.clear();
   state.lockedDids.clear();

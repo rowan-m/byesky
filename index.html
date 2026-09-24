@@ -26,6 +26,15 @@
     </header>
 
     <main class="container">
+      <!-- Shown when the signed-in session is missing permissions added since it was granted -->
+      <div id="reauth-banner" class="reauth-banner hidden" role="alert">
+        <div class="reauth-banner-text">
+          <strong>ByeSky needs an extra permission.</strong>
+          <span id="reauth-banner-detail"></span>
+        </div>
+        <button type="button" id="reauth-btn" class="btn btn-primary btn-sm">Sign in again</button>
+      </div>
+
       <!-- App Loading State -->
       <section id="app-loading-section" class="card">
         <div class="spinner"></div>

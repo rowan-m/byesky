@@ -1,3 +1,5 @@
+import { OAUTH_SCOPE } from '../src/scopes.js';
+
 // Test doubles for the network-facing modules, served in place of the real ones by the
 // Vite dev server via Playwright request interception.
 
@@ -44,10 +46,11 @@ function makeFollowings(count = 40) {
   }));
 }
 
-const fakeAuthModule = (followings) => `
+const fakeAuthModule = (followings, grantedScope) => `
 import { syncCache } from '/src/cache.js';
 const USER_DID = ${JSON.stringify(USER_DID)};
 const followings = ${JSON.stringify(followings)};
+const grantedScope = ${JSON.stringify(grantedScope)};
 export function initOAuthClient() {
   return {
     async init() {
@@ -58,9 +61,17 @@ export function initOAuthClient() {
         followings,
         lockedDids: [],
       });
-      return { session: { did: USER_DID, signOut: async () => {} } };
+      return {
+        session: {
+          did: USER_DID,
+          signOut: async () => {},
+          getTokenInfo: async () => ({ scope: grantedScope }),
+        },
+      };
     },
-    async signIn() {},
+    async signIn(handle) {
+      (window.__signInCalls ||= []).push(handle);
+    },
   };
 }
 `;
@@ -88,11 +99,15 @@ export async function fetchAccountPreview(agent, userDid, targetDid) {
 `;
 
 /** Serves fake auth/API modules so the dashboard renders with fixture data. */
-export async function mockSignedInApp(page, { count = 40 } = {}) {
+export async function mockSignedInApp(page, { count = 40, grantedScope = OAUTH_SCOPE } = {}) {
   const followings = makeFollowings(count);
   await page.route(
     (url) => url.pathname === '/src/auth.js',
-    (route) => route.fulfill({ contentType: 'text/javascript', body: fakeAuthModule(followings) }),
+    (route) =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body: fakeAuthModule(followings, grantedScope),
+      }),
   );
   await page.route(
     (url) => url.pathname === '/src/atproto.js',
