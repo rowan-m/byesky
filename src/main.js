@@ -911,9 +911,9 @@ function renderDashboard(resetSelection = true) {
       }
       if (item.neverPosted) {
         badgesHTML +=
-          '<span class="badge badge-warning" title="Never Posted: This account has no posts on Bluesky">NEVER POSTED</span>';
+          '<span class="badge badge-warning" title="Never Posted: No posts, replies or reposts found for this account">NEVER POSTED</span>';
       } else if (item.dynamicInactive) {
-        badgesHTML += `<span class="badge badge-warning" title="Inactive: has not posted in the last ${state.params.inactiveDays} days">INACTIVE</span>`;
+        badgesHTML += `<span class="badge badge-warning" title="Inactive: No posts, replies or reposts in the last ${state.params.inactiveDays} days">INACTIVE</span>`;
       }
       if (!item.criteria.isFollowingUser) {
         badgesHTML +=
@@ -955,7 +955,7 @@ function renderDashboard(resetSelection = true) {
       if (isUserNoisy(item, state.params.noisyPostsThreshold)) {
         const countStr =
           item.criteria.postsCount7Days !== undefined ? `${item.criteria.postsCount7Days}` : '10+';
-        badgesHTML += `<span class="badge badge-warning" title="Noisy Poster: Writes high frequency of posts/reposts (${escapeHTML(countStr)} in last 7 days)">NOISY</span>`;
+        badgesHTML += `<span class="badge badge-warning" title="Noisy Poster: High volume of posts, replies and reposts (${escapeHTML(countStr)} in last 7 days)">NOISY</span>`;
         warningsCount++;
       }
 
@@ -1605,23 +1605,30 @@ function renderHoverCardHTML(item, isHydrating = false) {
     `;
   }
 
-  // 3. Most Recent Post section
+  // 3. Latest activity section (posts, replies and reposts all count as activity)
   const lastPost = item.preview?.lastPost;
   const lastPostDateStr = escapeHTML(
     formatRelativeDate(lastPost?.date || item.criteria?.lastPostDate),
   );
+  const activityLabels = { post: 'Latest Post', reply: 'Latest Reply', repost: 'Latest Repost' };
+  const activityLabel = activityLabels[lastPost?.kind] || 'Latest Activity';
   let postHTML;
   if (lastPost && lastPost.text) {
     const safePostUrl = sanitizeUrl(lastPost.uri, profileUrl);
     const likes = (lastPost.likeCount || 0).toLocaleString();
     const reposts = (lastPost.repostCount || 0).toLocaleString();
+    const repostOfHTML =
+      lastPost.kind === 'repost' && lastPost.originalAuthor
+        ? `<div class="hover-card-post-meta"><span>↻ Reposted from @${escapeHTML(lastPost.originalAuthor)}</span></div>`
+        : '';
     postHTML = `
       <div class="hover-card-section">
         <div class="hover-card-section-label">
-          <span>Most Recent Post</span>
+          <span>${activityLabel}</span>
           <span>${lastPostDateStr}</span>
         </div>
         <div class="hover-card-post">
+          ${repostOfHTML}
           <div class="hover-card-post-text">${escapeHTML(lastPost.text)}</div>
           <div class="hover-card-post-meta">
             <span>♥ ${likes} · ↻ ${reposts}</span>
@@ -1634,11 +1641,11 @@ function renderHoverCardHTML(item, isHydrating = false) {
     postHTML = `
       <div class="hover-card-section">
         <div class="hover-card-section-label">
-          <span>Most Recent Post</span>
+          <span>${activityLabel}</span>
           <span>${lastPostDateStr}</span>
         </div>
         <div class="hover-card-post-meta">
-          <span>${isHydrating ? 'Fetching post snippet...' : 'Media/repost or no text content'}</span>
+          <span>${isHydrating ? 'Fetching post snippet...' : 'No text content (media only)'}</span>
           <a href="${profileUrl}" target="_blank" rel="noopener noreferrer">View feed ↗</a>
         </div>
       </div>
@@ -1646,8 +1653,8 @@ function renderHoverCardHTML(item, isHydrating = false) {
   } else {
     postHTML = `
       <div class="hover-card-section">
-        <div class="hover-card-section-label"><span>Most Recent Post</span><span>Never</span></div>
-        <div class="hover-card-mutuals"><span>No public posts found</span></div>
+        <div class="hover-card-section-label"><span>Latest Activity</span><span>Never</span></div>
+        <div class="hover-card-mutuals"><span>No posts, replies or reposts found</span></div>
       </div>
     `;
   }

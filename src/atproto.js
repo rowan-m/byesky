@@ -1,6 +1,6 @@
 import { Agent } from '@atproto/api';
 import { syncCache } from './cache.js';
-import { isSevereLabel, atUriToBskyUrl } from './scoring.js';
+import { isSevereLabel, atUriToBskyUrl, summariseAuthorActivity } from './scoring.js';
 
 // Simple sleep helper
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -593,49 +593,28 @@ async function runSync(agent, userDid, onUpdate) {
       // Spacing delay between consecutive calls = 300ms per worker
       await sleep(300);
 
-      // 1. Get latest post timestamp and calculate posting frequency (Noisy Poster check - posts only, no replies)
+      // 1. Latest activity and 7-day frequency (Never Posted / Inactive / Noisy Poster).
+      // Posts, replies and reposts all count, so fetch the unfiltered feed. Don't gate on
+      // the profile's postsCount: it excludes reposts, so repost-only accounts would be
+      // wrongly treated as never having posted.
       try {
-        if (f.criteria.postsCount > 0) {
-          const feedRes = await fetchWithBackoff(
-            userDid,
-            () =>
-              appViewAgent.api.app.bsky.feed.getAuthorFeed({
-                actor: f.did,
-                limit: 100,
-                filter: 'posts_no_replies',
-              }),
-            onUpdate,
-          );
+        const feedRes = await fetchWithBackoff(
+          userDid,
+          () =>
+            appViewAgent.api.app.bsky.feed.getAuthorFeed({
+              actor: f.did,
+              limit: 100,
+            }),
+          onUpdate,
+        );
 
-          const posts = feedRes.data.feed || [];
-          if (posts.length > 0) {
-            const lastPost = posts[0].post;
-            const lastPostDate = lastPost.indexedAt || lastPost.record?.createdAt || null;
-            f.criteria.lastPostDate = lastPostDate;
-            f.preview = f.preview || { mutuals: [], lastPost: null };
-            f.preview.lastPost = {
-              text: (lastPost.record?.text || '').slice(0, 280),
-              uri: atUriToBskyUrl(lastPost.uri),
-              date: lastPostDate,
-              likeCount: lastPost.likeCount || 0,
-              repostCount: lastPost.repostCount || 0,
-            };
-
-            // Count posts/reposts in the last 7 days
-            const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-            let postsInLast7Days = 0;
-            for (const feedItem of posts) {
-              const postDateStr = feedItem.post.indexedAt || feedItem.post.record?.createdAt;
-              if (postDateStr) {
-                const postTime = new Date(postDateStr).getTime();
-                if (postTime > sevenDaysAgo) {
-                  postsInLast7Days++;
-                }
-              }
-            }
-            f.criteria.postsCount7Days = postsInLast7Days;
-            f.criteria.isNoisy = postsInLast7Days >= 20;
-          }
+        const activity = summariseAuthorActivity(feedRes.data.feed || []);
+        f.criteria.lastPostDate = activity.lastPostDate;
+        f.criteria.postsCount7Days = activity.postsCount7Days;
+        f.criteria.isNoisy = activity.postsCount7Days >= 20;
+        if (activity.lastPost) {
+          f.preview = f.preview || { mutuals: [], lastPost: null };
+          f.preview.lastPost = activity.lastPost;
         }
       } catch (err) {
         if (err.message === 'Sync cancelled') throw err;
@@ -861,7 +840,6 @@ export async function fetchAccountPreview(agent, userDid, targetDid) {
     appViewAgent.api.app.bsky.feed.getAuthorFeed({
       actor: targetDid,
       limit: 1,
-      filter: 'posts_no_replies',
     }),
     agent.api.app.bsky.graph.getKnownFollowers({
       actor: targetDid,
@@ -874,19 +852,10 @@ export async function fetchAccountPreview(agent, userDid, targetDid) {
       ? (profileRes.value.data?.description || '').slice(0, 300)
       : '';
 
-  let lastPost = null;
-  if (feedRes.status === 'fulfilled') {
-    const firstItem = feedRes.value.data?.feed?.[0]?.post;
-    if (firstItem) {
-      lastPost = {
-        text: (firstItem.record?.text || '').slice(0, 280),
-        uri: atUriToBskyUrl(firstItem.uri),
-        date: firstItem.indexedAt || firstItem.record?.createdAt || null,
-        likeCount: firstItem.likeCount || 0,
-        repostCount: firstItem.repostCount || 0,
-      };
-    }
-  }
+  const lastPost =
+    feedRes.status === 'fulfilled'
+      ? summariseAuthorActivity(feedRes.value.data?.feed || []).lastPost
+      : null;
 
   let mutuals = [];
   let mutualsCount;

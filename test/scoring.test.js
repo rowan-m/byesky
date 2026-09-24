@@ -12,6 +12,7 @@ import {
   isUserMassFollower,
   calculateScore,
   filterAndSortFollowings,
+  summariseAuthorActivity,
 } from '../src/scoring.js';
 
 const defaultWeights = {
@@ -226,5 +227,71 @@ test('Scoring & Sanitization Helpers', async (t) => {
     );
     assert.strictEqual(hiddenLocked.length, 1);
     assert.strictEqual(hiddenLocked[0].did, 'did:plc:clean');
+  });
+
+  await t.test('summariseAuthorActivity counts posts, replies and reposts', () => {
+    const now = Date.parse('2026-09-24T12:00:00Z');
+    const iso = (daysAgo) => new Date(now - daysAgo * 24 * 60 * 60 * 1000).toISOString();
+    const post = (uri, daysAgo, extra = {}) => ({
+      uri,
+      indexedAt: iso(daysAgo),
+      record: { text: `text ${uri}` },
+      author: { handle: 'someone.else' },
+      ...extra,
+    });
+
+    // Repost-only account (profile postsCount would be 0): the repost is dated by when it
+    // was reposted, not when the original was written 400 days ago.
+    const repostOnly = summariseAuthorActivity(
+      [
+        {
+          post: post('at://did:plc:orig/app.bsky.feed.post/1', 400),
+          reason: { $type: 'app.bsky.feed.defs#reasonRepost', indexedAt: iso(2) },
+        },
+      ],
+      now,
+    );
+    assert.strictEqual(repostOnly.lastPostDate, iso(2));
+    assert.strictEqual(repostOnly.lastPost.kind, 'repost');
+    assert.strictEqual(repostOnly.lastPost.originalAuthor, 'someone.else');
+    assert.strictEqual(repostOnly.postsCount7Days, 1);
+
+    // Reply-only account counts as active, and replies count towards the 7-day total.
+    const replies = summariseAuthorActivity(
+      [
+        { post: post('at://did:plc:me/app.bsky.feed.post/2', 1), reply: { parent: {} } },
+        { post: post('at://did:plc:me/app.bsky.feed.post/3', 3), reply: { parent: {} } },
+        { post: post('at://did:plc:me/app.bsky.feed.post/4', 10) },
+      ],
+      now,
+    );
+    assert.strictEqual(replies.lastPost.kind, 'reply');
+    assert.strictEqual(replies.lastPostDate, iso(1));
+    assert.strictEqual(replies.postsCount7Days, 2);
+
+    // Newest item wins even if the feed isn't strictly ordered; pins are ignored.
+    const mixed = summariseAuthorActivity(
+      [
+        {
+          post: post('at://did:plc:me/app.bsky.feed.post/pinned', 0),
+          reason: { $type: 'app.bsky.feed.defs#reasonPin' },
+        },
+        { post: post('at://did:plc:me/app.bsky.feed.post/5', 5) },
+        { post: post('at://did:plc:me/app.bsky.feed.post/6', 4) },
+      ],
+      now,
+    );
+    assert.strictEqual(mixed.lastPost.kind, 'post');
+    assert.strictEqual(mixed.lastPostDate, iso(4));
+    assert.strictEqual(mixed.postsCount7Days, 2);
+
+    // Empty feed means never posted.
+    const empty = summariseAuthorActivity([], now);
+    assert.deepStrictEqual(empty, { lastPostDate: null, lastPost: null, postsCount7Days: 0 });
+    assert.strictEqual(isUserNeverPosted({ criteria: { lastPostDate: empty.lastPostDate } }), true);
+    assert.strictEqual(
+      isUserNeverPosted({ criteria: { lastPostDate: repostOnly.lastPostDate } }),
+      false,
+    );
   });
 });

@@ -68,6 +68,58 @@ export function truncateText(text, maxLength) {
   return `<abbr title="${escapeHTML(text)}" style="text-decoration: none; cursor: help; border-bottom: none;">${escapeHTML(truncated)}</abbr>`;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function feedItemKind(item) {
+  if (item.reason?.$type?.includes('reasonRepost')) return 'repost';
+  if (item.reply || item.post?.record?.reply) return 'reply';
+  return 'post';
+}
+
+/**
+ * Summarises an author feed into posting-activity criteria. The feed should be fetched
+ * without a filter so it includes posts, replies and reposts, all of which count as
+ * activity. Reposts are dated by when the account reposted, not when the original was
+ * posted. Pinned items are ignored because they aren't a signal of recent activity.
+ */
+export function summariseAuthorActivity(feed = [], now = Date.now()) {
+  const sevenDaysAgo = now - 7 * DAY_MS;
+  let latest = null;
+  let count7Days = 0;
+
+  for (const item of feed) {
+    if (!item?.post || item.reason?.$type?.includes('reasonPin')) continue;
+    const kind = feedItemKind(item);
+    const date =
+      kind === 'repost'
+        ? item.reason.indexedAt || item.post.indexedAt
+        : item.post.indexedAt || item.post.record?.createdAt;
+    const time = date ? new Date(date).getTime() : Number.NaN;
+    if (Number.isNaN(time)) continue;
+
+    if (time > sevenDaysAgo) count7Days++;
+    if (!latest || time > latest.time) latest = { time, date, kind, post: item.post };
+  }
+
+  if (!latest) return { lastPostDate: null, lastPost: null, postsCount7Days: 0 };
+
+  const { post } = latest;
+  return {
+    lastPostDate: latest.date,
+    postsCount7Days: count7Days,
+    lastPost: {
+      kind: latest.kind,
+      text: (post.record?.text || '').slice(0, 280),
+      uri: atUriToBskyUrl(post.uri),
+      date: latest.date,
+      // For reposts, whose post it was (the account being previewed didn't write it).
+      originalAuthor: latest.kind === 'repost' ? post.author?.handle || null : null,
+      likeCount: post.likeCount || 0,
+      repostCount: post.repostCount || 0,
+    },
+  };
+}
+
 export function isUserNeverPosted(item) {
   return !item.criteria?.lastPostDate;
 }
