@@ -3,7 +3,7 @@
   "client_name": "ByeSky",
   "client_uri": "https://bye-sky.web.app",
   "redirect_uris": ["https://bye-sky.web.app/"],
-  "scope": "atproto transition:generic repo:app.bsky.graph.follow",
+  "scope": "atproto transition:generic transition:chat.bsky repo:app.bsky.graph.follow",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none",

@@ -40,6 +40,11 @@ class UserSyncCache {
   }
 
   async get(did) {
+    // Serve directly from warm in-memory cache if already loaded in this session
+    if (this.store.has(did)) {
+      return this.store.get(did);
+    }
+
     // If not in browser (e.g. Node tests) or IndexedDB fails, use in-memory store
     if (!isBrowser) {
       return this._getMemoryFallback(did);
@@ -73,8 +78,32 @@ class UserSyncCache {
     }
   }
 
-  _getMemoryFallback(did) {
+  _loadLockedFromStorage(did) {
+    if (!isBrowser || typeof localStorage === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(`byesky_locked_${did}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (err) {
+      console.warn('Failed to load locked DIDs from localStorage:', err);
+    }
+    return [];
+  }
+
+  _saveLockedToStorage(did, lockedDids) {
+    if (!isBrowser || typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(`byesky_locked_${did}`, JSON.stringify(lockedDids));
+    } catch (err) {
+      console.warn('Failed to save locked DIDs to localStorage:', err);
+    }
+  }
+
+  _getMemoryFallback(did, preservedLockedDids = null) {
     if (!this.store.has(did)) {
+      const initialLocked = preservedLockedDids ?? this._loadLockedFromStorage(did);
       this.store.set(did, {
         status: 'idle',
         error: null,
@@ -84,6 +113,7 @@ class UserSyncCache {
           currentStage: 'Not started',
         },
         followings: [],
+        lockedDids: initialLocked,
         interactions: {
           likedBy: [],
           repostedBy: [],
@@ -100,7 +130,14 @@ class UserSyncCache {
 
   async set(did, data) {
     const current = await this.get(did);
-    const updated = { ...current, ...data, lastUpdated: Date.now() };
+    const lockedDids =
+      data.lockedDids !== undefined
+        ? data.lockedDids
+        : current.lockedDids || this._loadLockedFromStorage(did);
+    if (data.lockedDids !== undefined) {
+      this._saveLockedToStorage(did, lockedDids);
+    }
+    const updated = { ...current, ...data, lockedDids, lastUpdated: Date.now() };
     this.store.set(did, updated);
 
     if (!isBrowser) {
@@ -129,19 +166,30 @@ class UserSyncCache {
     }
   }
 
-  async updateProgress(did, processed, total, stage) {
+  async getLockedDids(did) {
+    const entry = await this.get(did);
+    return entry.lockedDids || this._loadLockedFromStorage(did);
+  }
+
+  async setLockedDids(did, lockedDidsArray) {
+    const cleanArray = Array.from(new Set(lockedDidsArray));
+    return this.set(did, { lockedDids: cleanArray });
+  }
+
+  async updateProgress(did, processed, total, stage, extraData = {}) {
     const current = await this.get(did);
-    current.progress = {
+    const progress = {
       total: total !== undefined ? total : current.progress.total,
       processed: processed !== undefined ? processed : current.progress.processed,
       currentStage: stage || current.progress.currentStage,
     };
-    current.lastUpdated = Date.now();
-    await this.set(did, current);
+    return this.set(did, { ...extraData, progress });
   }
 
   async clear(did) {
+    const existingLocked = this.store.get(did)?.lockedDids || this._loadLockedFromStorage(did);
     this.store.delete(did);
+    this._getMemoryFallback(did, existingLocked);
     if (!isBrowser) return;
 
     try {

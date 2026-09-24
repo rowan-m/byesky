@@ -36,6 +36,13 @@ Run the local unit test suite using Node's native test runner:
 npm run test
 ```
 
+Browser layout tests (phone, tablet and desktop viewports) use Playwright with faked auth/API modules, so no sign-in is needed:
+
+```bash
+npx playwright install chromium  # first time only
+npm run test:e2e
+```
+
 ### 5. Production Compilation
 
 Compile and minify the project assets into optimized distribution files (`dist/`):

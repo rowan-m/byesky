@@ -1,6 +1,14 @@
-import { Agent } from '@atproto/api';
-import { initOAuthClient, startBackgroundSync, batchUnfollow, followUser } from './atproto.js';
+import { initOAuthClient } from './auth.js';
+import { getMissingScopes } from './scopes.js';
 import { syncCache } from './cache.js';
+import {
+  isUserNoisy,
+  isUserMassFollower,
+  filterAndSortFollowings,
+  escapeHTML,
+  sanitizeUrl,
+  truncateText,
+} from './scoring.js';
 
 // Application State
 let state = {
@@ -15,6 +23,7 @@ let state = {
   },
   followings: [], // Raw followings from backend
   selectedDids: new Set(), // DIDs marked for unfollowing
+  lockedDids: new Set(), // DIDs protected from Select All and unfollowing
   pagination: {
     currentPage: 1,
     pageSize: 100,
@@ -26,11 +35,13 @@ let state = {
   searchQuery: '',
   weights: {
     notFollowing: 1,
-    inactive: 4,
+    inactive: 3,
+    neverPosted: 4,
     noInbound: 1,
     noOutbound: 5,
     deletedBanned: 4,
     blocking: 4,
+    lowFollowers: 0,
     noisy: 1,
     muted: 4,
     massFollower: 1,
@@ -40,8 +51,10 @@ let state = {
   },
   filters: {
     ok: true,
+    locked: true,
     notFollowing: true,
     inactive: true,
+    neverPosted: true,
     noInbound: true,
     noOutbound: true,
     deletedBanned: true,
@@ -61,6 +74,7 @@ let state = {
     massFollowerThreshold: 3500,
   },
   pendingUnfollowDids: [], // Holds DIDs during confirmation modal
+  missingScopes: [], // Required OAuth scopes this session wasn't granted (see scopes.js)
 };
 
 // DOM Elements
@@ -104,6 +118,39 @@ const modalDesc = document.getElementById('modal-desc');
 const modalCancelBtn = document.getElementById('modal-cancel-btn');
 const modalConfirmBtn = document.getElementById('modal-confirm-btn');
 
+// Singleton Rich Hover Preview Card
+const hoverCard = document.getElementById('profile-hover-card');
+let hoverShowTimeout = null;
+let hoverHideTimeout = null;
+let activeHoverDid = null;
+
+// @atproto/api is ~80% of the bundle and only needed once signed in, so it's loaded on demand.
+let atprotoApi = null;
+async function loadAtprotoApi() {
+  atprotoApi ??= await import('./atproto.js');
+  return atprotoApi;
+}
+
+// Hint (not a credential) that a session probably exists, so the API chunk can be
+// fetched in parallel with OAuth session restore instead of after it.
+const SESSION_HINT_KEY = 'byesky:hasSession';
+function setSessionHint(hasSession) {
+  try {
+    if (hasSession) localStorage.setItem(SESSION_HINT_KEY, '1');
+    else localStorage.removeItem(SESSION_HINT_KEY);
+  } catch {
+    // Storage unavailable; we just lose the preload optimisation.
+  }
+}
+function isLikelySignedIn() {
+  const isOAuthCallback = /[?#&](code|state)=/.test(window.location.search + window.location.hash);
+  try {
+    return isOAuthCallback || localStorage.getItem(SESSION_HINT_KEY) === '1';
+  } catch {
+    return isOAuthCallback;
+  }
+}
+
 // --- Initialization ---
 window.addEventListener('DOMContentLoaded', async () => {
   // Conforms with RFC 8252 loopback IP policies (which prohibit "localhost" hostnames)
@@ -136,6 +183,9 @@ function setupEventListeners() {
   // Logout Button
   logoutBtn.addEventListener('click', handleLogout);
 
+  // Re-authorise when the session is missing newly required scopes
+  document.getElementById('reauth-btn')?.addEventListener('click', handleReauth);
+
   // Resync Button
   resyncBtn.addEventListener('click', triggerSync);
 
@@ -143,10 +193,12 @@ function setupEventListeners() {
   const weights = [
     'not-following',
     'inactive',
+    'never-posted',
     'no-inbound',
     'no-outbound',
     'deleted-banned',
     'blocking',
+    'low-followers',
     'noisy',
     'muted',
     'mass-follower',
@@ -156,24 +208,26 @@ function setupEventListeners() {
   ];
   weights.forEach((w) => {
     const slider = document.getElementById(`weight-${w}`);
-    const valDisplay = document.getElementById(`val-${w}`);
 
     // Convert hyphenated back to camelCase for state
     const stateKey = w.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
 
     slider.addEventListener('input', (e) => {
       const val = parseInt(e.target.value, 10);
-      valDisplay.textContent = val;
       state.weights[stateKey] = val;
       renderDashboard(); // Re-render table and update scores instantly
     });
+
+    enhanceWeightControl(slider);
   });
 
   // Checkboxes Filters
   const filterCheckboxes = [
     { id: 'filter-ok', key: 'ok' },
+    { id: 'filter-locked', key: 'locked' },
     { id: 'filter-not-following', key: 'notFollowing' },
     { id: 'filter-inactive', key: 'inactive' },
+    { id: 'filter-never-posted', key: 'neverPosted' },
     { id: 'filter-no-inbound', key: 'noInbound' },
     { id: 'filter-no-outbound', key: 'noOutbound' },
     { id: 'filter-deleted-banned', key: 'deletedBanned' },
@@ -189,23 +243,33 @@ function setupEventListeners() {
 
   filterCheckboxes.forEach((f) => {
     const checkbox = document.getElementById(f.id);
+    const parentItem = checkbox.closest('.criteria-item');
+    if (parentItem) {
+      parentItem.classList.toggle('is-filtered-out', !checkbox.checked);
+    }
     checkbox.addEventListener('change', (e) => {
       state.filters[f.key] = e.target.checked;
+      if (parentItem) {
+        parentItem.classList.toggle('is-filtered-out', !e.target.checked);
+      }
       state.pagination.currentPage = 1; // Reset to page 1 on filter
+      updateConfigSummary();
       renderDashboard();
     });
   });
 
+  setupConfigPanel();
+
   // Parameters
   document.getElementById('param-inactive-days').addEventListener('input', (e) => {
-    const val = parseInt(e.target.value, 10) || 90;
-    state.params.inactiveDays = val;
+    const val = parseInt(e.target.value, 10);
+    state.params.inactiveDays = Number.isNaN(val) ? 180 : val;
     renderDashboard();
   });
 
   document.getElementById('param-low-followers').addEventListener('input', (e) => {
-    const val = parseInt(e.target.value, 10) || 50;
-    state.params.lowFollowersThreshold = val;
+    const val = parseInt(e.target.value, 10);
+    state.params.lowFollowersThreshold = Number.isNaN(val) ? 50 : val;
     renderDashboard();
   });
 
@@ -315,17 +379,266 @@ function setupEventListeners() {
   // Cancel and Retry Sync buttons
   cancelSyncBtn.addEventListener('click', handleCancelSync);
   retrySyncBtn.addEventListener('click', handleRetrySync);
+
+  // Keep singleton hover card visible when hovered directly
+  if (hoverCard) {
+    hoverCard.addEventListener('mouseenter', () => {
+      clearTimeout(hoverHideTimeout);
+    });
+    hoverCard.addEventListener('mouseleave', () => {
+      scheduleHideHoverCard();
+    });
+  }
+  window.addEventListener(
+    'scroll',
+    () => {
+      hideHoverCardImmediately();
+    },
+    { passive: true },
+  );
+
+  // Preview sheet (touch / keyboard): close via button or a tap on the ::backdrop,
+  // which targets the <dialog> element itself rather than its content.
+  const previewSheet = document.getElementById('preview-sheet');
+  if (previewSheet) {
+    previewSheet
+      .querySelector('.preview-sheet-close')
+      ?.addEventListener('click', () => previewSheet.close());
+    previewSheet.addEventListener('click', (e) => {
+      if (e.target === previewSheet) previewSheet.close();
+    });
+  }
+}
+
+// --- Criteria & Scoring Panel ---
+const CONFIG_COLLAPSED_KEY = 'byesky:configCollapsed';
+// Keep in sync with the narrow-layout breakpoint in style.css.
+const narrowLayoutQuery = window.matchMedia('(max-width: 1100px)');
+
+/**
+ * Renders a 0–5 segmented radio group in place of a range slider. The (hidden) range
+ * input remains the source of truth, so existing `input` listeners keep working.
+ */
+function enhanceWeightControl(slider) {
+  const min = parseInt(slider.min, 10) || 0;
+  const max = parseInt(slider.max, 10) || 5;
+
+  const group = document.createElement('div');
+  group.className = 'weight-seg';
+  group.setAttribute('role', 'radiogroup');
+  group.setAttribute('aria-label', slider.getAttribute('aria-label') || 'Weight');
+
+  const buttons = [];
+  for (let v = min; v <= max; v++) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'weight-seg-btn';
+    btn.textContent = String(v);
+    btn.dataset.value = String(v);
+    btn.setAttribute('role', 'radio');
+    buttons.push(btn);
+    group.appendChild(btn);
+  }
+
+  const sync = () => {
+    const current = slider.value;
+    buttons.forEach((btn) => {
+      const isActive = btn.dataset.value === current;
+      btn.setAttribute('aria-checked', String(isActive));
+      btn.tabIndex = isActive ? 0 : -1; // roving tabindex
+    });
+  };
+
+  const select = (value, focus = false) => {
+    const clamped = Math.min(max, Math.max(min, value));
+    if (String(clamped) !== slider.value) {
+      slider.value = String(clamped);
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    sync();
+    if (focus) buttons[clamped - min].focus();
+  };
+
+  group.addEventListener('click', (e) => {
+    const btn = e.target.closest('.weight-seg-btn');
+    if (btn) select(parseInt(btn.dataset.value, 10));
+  });
+
+  group.addEventListener('keydown', (e) => {
+    const current = parseInt(slider.value, 10);
+    const keyMap = {
+      ArrowRight: current + 1,
+      ArrowUp: current + 1,
+      ArrowLeft: current - 1,
+      ArrowDown: current - 1,
+      Home: min,
+      End: max,
+    };
+    if (e.key in keyMap) {
+      e.preventDefault();
+      select(keyMap[e.key], true);
+    }
+  });
+
+  slider.classList.add('visually-hidden');
+  slider.tabIndex = -1;
+  slider.setAttribute('aria-hidden', 'true');
+  slider.insertAdjacentElement('afterend', group);
+  sync();
+}
+
+function readStoredConfigCollapsed() {
+  try {
+    return localStorage.getItem(CONFIG_COLLAPSED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function storeConfigCollapsed(collapsed) {
+  try {
+    localStorage.setItem(CONFIG_COLLAPSED_KEY, String(collapsed));
+  } catch {
+    // Storage unavailable (e.g. privacy mode); preference just won't persist.
+  }
+}
+
+// Page regions made inert while the narrow-screen sheet is open (modal behaviour).
+const CONFIG_OVERLAY_INERT_SELECTORS = ['.app-header', '.dashboard-main', '.app-footer'];
+
+function setConfigOverlay(overlay) {
+  const panel = document.getElementById('config-panel');
+  const backdrop = document.getElementById('config-backdrop');
+  if (overlay && panel) {
+    // Pin the expanded sheet exactly where the bar currently sits so it can be sized
+    // against the visible viewport (a sticky element's offset varies with scroll).
+    const rect = panel.getBoundingClientRect();
+    const root = document.documentElement.style;
+    root.setProperty('--config-panel-top', `${Math.max(0, Math.round(rect.top))}px`);
+    root.setProperty('--config-panel-left', `${Math.round(rect.left)}px`);
+    root.setProperty('--config-panel-w', `${Math.round(rect.width)}px`);
+    root.setProperty('--config-bar-h', `${Math.round(rect.height)}px`);
+  }
+  document.documentElement.classList.toggle('is-config-overlay', overlay);
+  if (backdrop) backdrop.hidden = !overlay;
+
+  if (panel) {
+    if (overlay) {
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      panel.setAttribute('aria-label', 'Criteria & Scoring');
+    } else {
+      panel.removeAttribute('role');
+      panel.removeAttribute('aria-modal');
+      panel.removeAttribute('aria-label');
+    }
+  }
+  CONFIG_OVERLAY_INERT_SELECTORS.forEach((selector) => {
+    document.querySelector(selector)?.toggleAttribute('inert', overlay);
+  });
+}
+
+function setConfigCollapsed(collapsed) {
+  // Measure before toggling classes so the sheet is anchored to the collapsed bar.
+  setConfigOverlay(narrowLayoutQuery.matches && !collapsed);
+  document.querySelector('.dashboard-grid')?.classList.toggle('is-config-collapsed', collapsed);
+  document.getElementById('config-toggle')?.setAttribute('aria-expanded', String(!collapsed));
+}
+
+/** Narrow screens always start collapsed; wide screens restore the user's last choice. */
+function applyConfigLayout() {
+  setConfigCollapsed(narrowLayoutQuery.matches ? true : readStoredConfigCollapsed());
+}
+
+function setupConfigPanel() {
+  const toggle = document.getElementById('config-toggle');
+  const grid = document.querySelector('.dashboard-grid');
+  if (!toggle || !grid) return;
+
+  const isOverlayOpen = () =>
+    narrowLayoutQuery.matches && !grid.classList.contains('is-config-collapsed');
+  const closeOverlay = () => {
+    setConfigCollapsed(true);
+    toggle.focus();
+  };
+
+  toggle.addEventListener('click', () => {
+    const collapsed = !grid.classList.contains('is-config-collapsed');
+    setConfigCollapsed(collapsed);
+    if (!narrowLayoutQuery.matches) storeConfigCollapsed(collapsed);
+  });
+
+  // Escape closes the expanded overlay-style panel on narrow screens.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isOverlayOpen()) closeOverlay();
+  });
+
+  // The backdrop is a real element so taps outside the sheet are absorbed rather than
+  // activating whatever is underneath (rows, lock toggles, the batch Unfollow button).
+  document.getElementById('config-backdrop')?.addEventListener('click', closeOverlay);
+
+  narrowLayoutQuery.addEventListener('change', applyConfigLayout);
+
+  // Re-anchor the open sheet when the width changes (e.g. rotation). Height-only
+  // resizes (mobile browser chrome showing/hiding) are handled by dvh.
+  let lastWidth = window.innerWidth;
+  window.addEventListener('resize', () => {
+    if (window.innerWidth === lastWidth) return;
+    lastWidth = window.innerWidth;
+    if (isOverlayOpen()) {
+      const body = document.getElementById('config-body');
+      const scrollTop = body?.scrollTop ?? 0;
+      grid.classList.add('is-config-collapsed');
+      setConfigOverlay(true);
+      grid.classList.remove('is-config-collapsed');
+      if (body) body.scrollTop = scrollTop;
+    }
+  });
+  applyConfigLayout();
+  updateConfigSummary();
+
+  // Expose the sticky header height so the sticky sidebar/top bar can sit beneath it.
+  const header = document.querySelector('.app-header');
+  if (header && 'ResizeObserver' in window) {
+    new window.ResizeObserver(([entry]) => {
+      const height = Math.ceil(entry.target.getBoundingClientRect().height);
+      document.documentElement.style.setProperty('--header-h', `${height}px`);
+    }).observe(header);
+  }
+
+  // Expose the panel's height so, on wide screens, a panel taller than the window sticks
+  // with its bottom in view instead of needing its own scrollbar.
+  const panel = document.getElementById('config-panel');
+  if (panel && 'ResizeObserver' in window) {
+    new window.ResizeObserver(([entry]) => {
+      const height = Math.ceil(entry.target.getBoundingClientRect().height);
+      document.documentElement.style.setProperty('--sidebar-h', `${height}px`);
+    }).observe(panel);
+  }
+}
+
+function updateConfigSummary() {
+  const summary = document.getElementById('config-summary');
+  if (!summary) return;
+  const hiddenCount = Object.values(state.filters).filter((shown) => !shown).length;
+  const plural = hiddenCount === 1 ? '' : 's';
+  summary.textContent = hiddenCount === 0 ? 'All shown' : `${hiddenCount} filter${plural} off`;
+  summary.classList.toggle('has-hidden', hiddenCount > 0);
 }
 
 function initializeStateFromDOM() {
   state.weights.notFollowing =
     parseInt(document.getElementById('weight-not-following').value, 10) || 1;
-  state.weights.inactive = parseInt(document.getElementById('weight-inactive').value, 10) || 4;
+  state.weights.inactive = parseInt(document.getElementById('weight-inactive').value, 10) || 3;
+  state.weights.neverPosted =
+    parseInt(document.getElementById('weight-never-posted').value, 10) || 4;
   state.weights.noInbound = parseInt(document.getElementById('weight-no-inbound').value, 10) || 1;
   state.weights.noOutbound = parseInt(document.getElementById('weight-no-outbound').value, 10) || 5;
   state.weights.deletedBanned =
     parseInt(document.getElementById('weight-deleted-banned').value, 10) || 4;
   state.weights.blocking = parseInt(document.getElementById('weight-blocking').value, 10) || 4;
+  state.weights.lowFollowers =
+    parseInt(document.getElementById('weight-low-followers')?.value ?? '0', 10) || 0;
   state.weights.noisy = parseInt(document.getElementById('weight-noisy').value, 10) || 1;
   state.weights.muted = parseInt(document.getElementById('weight-muted').value, 10) || 4;
   state.weights.massFollower =
@@ -336,8 +649,10 @@ function initializeStateFromDOM() {
   state.weights.outlier = parseInt(document.getElementById('weight-outlier').value, 10) || 1;
 
   state.filters.ok = document.getElementById('filter-ok').checked;
+  state.filters.locked = document.getElementById('filter-locked').checked;
   state.filters.notFollowing = document.getElementById('filter-not-following').checked;
   state.filters.inactive = document.getElementById('filter-inactive').checked;
+  state.filters.neverPosted = document.getElementById('filter-never-posted').checked;
   state.filters.noInbound = document.getElementById('filter-no-inbound').checked;
   state.filters.noOutbound = document.getElementById('filter-no-outbound').checked;
   state.filters.deletedBanned = document.getElementById('filter-deleted-banned').checked;
@@ -367,15 +682,18 @@ function initializeStateFromDOM() {
 // --- Session & Authentication ---
 async function checkSession() {
   try {
+    if (isLikelySignedIn()) loadAtprotoApi().catch(() => {}); // warm up in parallel
     const oauthClient = initOAuthClient();
     const result = await oauthClient.init();
 
     if (result && result.session) {
+      const api = await loadAtprotoApi();
+      setSessionHint(true);
       state.session = result.session;
-      state.agent = new Agent(result.session);
+      state.agent = api.createAgent(result.session);
 
       // Fetch profile via public AppView to completely bypass PDS CORS/proxy blocks on login
-      const publicAgent = new Agent({ service: 'https://api.bsky.app' });
+      const publicAgent = api.createAgent({ service: 'https://api.bsky.app' });
       const profile = await publicAgent.api.app.bsky.actor.getProfile({
         actor: result.session.did,
       });
@@ -386,8 +704,15 @@ async function checkSession() {
       };
 
       showUserSession(state.user.handle);
-      await checkSyncStatus();
+      const missingScopes = await checkGrantedScopes(result.session);
+      // Returning from "Sign in again": resync so the newly granted data is included.
+      if (consumeResyncAfterReauth() && missingScopes.length === 0) {
+        await triggerSync();
+      } else {
+        await checkSyncStatus();
+      }
     } else {
+      setSessionHint(false);
       state.user = null;
       showAuthSection();
     }
@@ -395,6 +720,64 @@ async function checkSession() {
     console.error('Session check failed:', err);
     state.user = null;
     showAuthSection();
+  }
+}
+
+// --- Granted-scope check ---
+// Sessions authorised before the app added a scope keep their original grant until the
+// user signs in again, so check what was granted and prompt if anything is missing.
+const RESYNC_AFTER_REAUTH_KEY = 'byesky:resyncAfterReauth';
+
+async function checkGrantedScopes(session) {
+  let missing = [];
+  try {
+    const { scope } = await session.getTokenInfo(false);
+    missing = getMissingScopes(scope);
+  } catch (err) {
+    console.warn('Could not read granted OAuth scopes:', err);
+  }
+  state.missingScopes = missing;
+  renderReauthBanner();
+  return missing;
+}
+
+function renderReauthBanner(errorMessage = '') {
+  const banner = document.getElementById('reauth-banner');
+  const detail = document.getElementById('reauth-banner-detail');
+  if (!banner || !detail) return;
+
+  const missing = state.user ? state.missingScopes : [];
+  banner.classList.toggle('hidden', missing.length === 0);
+  if (missing.length === 0) return;
+
+  const purposes = missing.map(({ purpose }) => purpose).join(' and ');
+  detail.textContent =
+    errorMessage ||
+    `Sign in again to allow it to ${purposes}. Syncing still works, but results will be incomplete until you do.`;
+}
+
+function consumeResyncAfterReauth() {
+  try {
+    const pending = sessionStorage.getItem(RESYNC_AFTER_REAUTH_KEY) === '1';
+    sessionStorage.removeItem(RESYNC_AFTER_REAUTH_KEY);
+    return pending;
+  } catch {
+    return false;
+  }
+}
+
+async function handleReauth() {
+  if (!state.user) return;
+  try {
+    sessionStorage.setItem(RESYNC_AFTER_REAUTH_KEY, '1');
+  } catch {
+    // Without storage we just skip the automatic resync after returning.
+  }
+  try {
+    // Redirects to the user's PDS, which asks them to approve the full, current scope set.
+    await initOAuthClient().signIn(state.user.handle);
+  } catch (err) {
+    renderReauthBanner(`Couldn't start sign-in: ${err.message || err}. Please try again.`);
   }
 }
 
@@ -426,11 +809,15 @@ async function handleLogout() {
     await syncCache.clear(state.user.did);
   }
 
+  setSessionHint(false);
   state.user = null;
   state.session = null;
   state.agent = null;
+  state.missingScopes = [];
+  renderReauthBanner();
   state.followings = [];
   state.selectedDids.clear();
+  state.lockedDids.clear();
   showAuthSection();
 }
 
@@ -441,6 +828,7 @@ async function checkSyncStatus() {
   try {
     const cachedState = await syncCache.get(state.user.did);
     state.sync = cachedState;
+    state.lockedDids = new Set(await syncCache.getLockedDids(state.user.did));
 
     if (cachedState.lastUpdated) {
       lastSyncedTime.textContent = formatLastSynced(cachedState.lastUpdated);
@@ -453,7 +841,7 @@ async function checkSyncStatus() {
     } else if (cachedState.status === 'fetching' || cachedState.status === 'enriching') {
       showSyncSection(cachedState);
       // Restart background sync in browser and attach update callback
-      startBackgroundSync(state.agent, state.user.did, onSyncUpdate);
+      atprotoApi.startBackgroundSync(state.agent, state.user.did, onSyncUpdate);
     } else if (cachedState.status === 'completed') {
       syncSection.classList.add('hidden');
       await loadFollowings();
@@ -491,7 +879,7 @@ async function triggerSync() {
     // Instantly check status & start background execution
     const cachedState = await syncCache.get(state.user.did);
     showSyncSection(cachedState);
-    startBackgroundSync(state.agent, state.user.did, onSyncUpdate);
+    atprotoApi.startBackgroundSync(state.agent, state.user.did, onSyncUpdate);
   } catch (err) {
     console.error('Trigger sync error:', err);
   }
@@ -507,6 +895,7 @@ async function onSyncUpdate() {
   try {
     const cachedState = await syncCache.get(state.user.did);
     state.sync = cachedState;
+    state.lockedDids = new Set(await syncCache.getLockedDids(state.user.did));
 
     if (cachedState.lastUpdated) {
       lastSyncedTime.textContent = formatLastSynced(cachedState.lastUpdated);
@@ -538,6 +927,7 @@ async function loadFollowings() {
   try {
     const cachedState = await syncCache.get(state.user.did);
     state.followings = cachedState.followings || [];
+    state.lockedDids = new Set(await syncCache.getLockedDids(state.user.did));
 
     // Hide progress, loader, and auth connection card, show dashboard
     hideLoading();
@@ -551,192 +941,8 @@ async function loadFollowings() {
 }
 
 // --- Scoring, Filtering & Sorting Computations ---
-function calculateScore(item) {
-  if (item.criteria.isDeleted || item.criteria.isBanned) {
-    return state.weights.deletedBanned;
-  }
-  let score = 0;
-
-  if (!item.criteria.isFollowingUser) {
-    score += state.weights.notFollowing;
-  }
-
-  let isInactive = isUserInactive(item);
-  if (isInactive) {
-    score += state.weights.inactive;
-  }
-
-  const hasInbound =
-    item.criteria.hasLikedUser ||
-    item.criteria.hasRepostedUser ||
-    item.criteria.hasRepliedToUser ||
-    item.criteria.hasMessagedUser ||
-    item.criteria.userInteracted;
-  if (!hasInbound) {
-    score += state.weights.noInbound;
-  }
-
-  const hasOutbound = item.criteria.userContactedThem;
-  if (!hasOutbound) {
-    score += state.weights.noOutbound;
-  }
-
-  if (item.criteria.isBlocking || item.criteria.isBlocked) {
-    score += state.weights.blocking;
-  }
-
-  if (isUserNoisy(item)) {
-    score += state.weights.noisy;
-  }
-
-  if (item.criteria.isMuted) {
-    score += state.weights.muted;
-  }
-
-  if (isUserMassFollower(item)) {
-    score += state.weights.massFollower;
-  }
-
-  if (item.criteria.isSpammyRatio) {
-    score += state.weights.spammyRatio;
-  }
-
-  if (item.criteria.isFlagged) {
-    score += state.weights.flagged;
-  }
-
-  if (item.criteria.isOutlier) {
-    score += state.weights.outlier;
-  }
-
-  return score;
-}
-
-function isUserInactive(item) {
-  if (item.criteria.lastPostDate) {
-    const lastPost = new Date(item.criteria.lastPostDate).getTime();
-    const daysSincePost = (Date.now() - lastPost) / (1000 * 60 * 60 * 24);
-    return daysSincePost > state.params.inactiveDays;
-  }
-  return true; // Never posted/no postsCount
-}
-
-function isUserNoisy(item) {
-  const threshold = state.params.noisyPostsThreshold || 20;
-  if (item.criteria.postsCount7Days !== undefined) {
-    return item.criteria.postsCount7Days >= threshold;
-  }
-  return !!item.criteria.isNoisy;
-}
-
-function isUserMassFollower(item) {
-  const threshold = state.params.massFollowerThreshold || 3500;
-  if (item.criteria.followsCount !== undefined) {
-    return item.criteria.followsCount >= threshold;
-  }
-  return !!item.criteria.isMassFollower;
-}
-
 function getFilteredAndSortedList() {
-  return state.followings
-    .map((item) => {
-      const score = calculateScore(item);
-      const dynamicInactive = isUserInactive(item);
-      return { ...item, score, dynamicInactive };
-    })
-    .filter((item) => {
-      // Search
-      if (state.searchQuery) {
-        const q = state.searchQuery.toLowerCase();
-        const nMatch = item.displayName && item.displayName.toLowerCase().includes(q);
-        const hMatch = item.handle && item.handle.toLowerCase().includes(q);
-        if (!nMatch && !hMatch) return false;
-      }
-
-      // Determine warning/inactive criteria matches
-      const hasInbound =
-        item.criteria.hasLikedUser ||
-        item.criteria.hasRepostedUser ||
-        item.criteria.hasRepliedToUser ||
-        item.criteria.hasMessagedUser ||
-        item.criteria.userInteracted;
-
-      const hasOutbound = item.criteria.userContactedThem;
-
-      const criteriaMatches = {
-        notFollowing: !item.criteria.isFollowingUser,
-        inactive: item.dynamicInactive,
-        noInbound: !hasInbound,
-        noOutbound: !hasOutbound,
-        deletedBanned: !!(item.criteria.isDeleted || item.criteria.isBanned),
-        blocking: !!(item.criteria.isBlocking || item.criteria.isBlocked),
-        lowFollowers: item.criteria.followersCount < state.params.lowFollowersThreshold,
-        noisy: isUserNoisy(item),
-        muted: !!item.criteria.isMuted,
-        massFollower: isUserMassFollower(item),
-        spammyRatio: !!item.criteria.isSpammyRatio,
-        flagged: !!item.criteria.isFlagged,
-        outlier: !!item.criteria.isOutlier,
-      };
-
-      // Account has "OK" status if it has none of the warning/inactive flags
-      const isOk =
-        !criteriaMatches.notFollowing &&
-        !criteriaMatches.inactive &&
-        !criteriaMatches.noInbound &&
-        !criteriaMatches.noOutbound &&
-        !criteriaMatches.deletedBanned &&
-        !criteriaMatches.blocking &&
-        !criteriaMatches.lowFollowers &&
-        !criteriaMatches.noisy &&
-        !criteriaMatches.muted &&
-        !criteriaMatches.massFollower &&
-        !criteriaMatches.spammyRatio &&
-        !criteriaMatches.flagged &&
-        !criteriaMatches.outlier;
-
-      // OR Filter check: The item is shown if it matches at least one checked criterion
-      let matchesFilter = false;
-
-      if (isOk && state.filters.ok) matchesFilter = true;
-      if (criteriaMatches.notFollowing && state.filters.notFollowing) matchesFilter = true;
-      if (criteriaMatches.inactive && state.filters.inactive) matchesFilter = true;
-      if (criteriaMatches.noInbound && state.filters.noInbound) matchesFilter = true;
-      if (criteriaMatches.noOutbound && state.filters.noOutbound) matchesFilter = true;
-      if (criteriaMatches.deletedBanned && state.filters.deletedBanned) matchesFilter = true;
-      if (criteriaMatches.blocking && state.filters.blocking) matchesFilter = true;
-      if (criteriaMatches.lowFollowers && state.filters.lowFollowers) matchesFilter = true;
-      if (criteriaMatches.noisy && state.filters.noisy) matchesFilter = true;
-      if (criteriaMatches.muted && state.filters.muted) matchesFilter = true;
-      if (criteriaMatches.massFollower && state.filters.massFollower) matchesFilter = true;
-      if (criteriaMatches.spammyRatio && state.filters.spammyRatio) matchesFilter = true;
-      if (criteriaMatches.flagged && state.filters.flagged) matchesFilter = true;
-      if (criteriaMatches.outlier && state.filters.outlier) matchesFilter = true;
-
-      return matchesFilter;
-    })
-    .sort((a, b) => {
-      let valA, valB;
-      if (state.sorting.col === 'followers') {
-        valA = a.criteria.followersCount;
-        valB = b.criteria.followersCount;
-      } else if (state.sorting.col === 'lastPost') {
-        valA = a.criteria.lastPostDate ? new Date(a.criteria.lastPostDate).getTime() : 0;
-        valB = b.criteria.lastPostDate ? new Date(b.criteria.lastPostDate).getTime() : 0;
-      } else if (state.sorting.col === 'lastInteraction') {
-        const dateA = a.criteria.lastInteraction?.date || a.criteria.lastLikeDate;
-        const dateB = b.criteria.lastInteraction?.date || b.criteria.lastLikeDate;
-        valA = dateA ? new Date(dateA).getTime() : 0;
-        valB = dateB ? new Date(dateB).getTime() : 0;
-      } else if (state.sorting.col === 'score') {
-        valA = a.score;
-        valB = b.score;
-      }
-
-      if (valA < valB) return state.sorting.order === 'asc' ? -1 : 1;
-      if (valA > valB) return state.sorting.order === 'asc' ? 1 : -1;
-      return 0;
-    });
+  return filterAndSortFollowings(state.followings, state);
 }
 
 // --- Render Operations ---
@@ -784,8 +990,11 @@ function renderDashboard(resetSelection = true) {
         badgesHTML +=
           '<span class="badge badge-danger" title="This account is blocking you or blocked by you">BLOCK</span>';
       }
-      if (item.dynamicInactive) {
-        badgesHTML += `<span class="badge badge-warning" title="Inactive: has not posted in the last ${state.params.inactiveDays} days">INACTIVE</span>`;
+      if (item.neverPosted) {
+        badgesHTML +=
+          '<span class="badge badge-warning" title="Never Posted: No posts, replies or reposts found for this account">NEVER POSTED</span>';
+      } else if (item.dynamicInactive) {
+        badgesHTML += `<span class="badge badge-warning" title="Inactive: No posts, replies or reposts in the last ${state.params.inactiveDays} days">INACTIVE</span>`;
       }
       if (!item.criteria.isFollowingUser) {
         badgesHTML +=
@@ -803,7 +1012,7 @@ function renderDashboard(resetSelection = true) {
       let warningsCount = 0;
       if (item.criteria.isDeleted || item.criteria.isBanned) warningsCount++;
       if (item.criteria.isBlocking || item.criteria.isBlocked) warningsCount++;
-      if (item.dynamicInactive) warningsCount++;
+      if (item.neverPosted || item.dynamicInactive) warningsCount++;
       if (!item.criteria.isFollowingUser) warningsCount++;
 
       if (!hasInbound) {
@@ -824,10 +1033,10 @@ function renderDashboard(resetSelection = true) {
           '<span class="badge badge-success" title="You liked, replied, or reposted them recently (scanned last 1,000 activities)">I CONTACTED</span>';
       }
 
-      if (isUserNoisy(item)) {
+      if (isUserNoisy(item, state.params.noisyPostsThreshold)) {
         const countStr =
           item.criteria.postsCount7Days !== undefined ? `${item.criteria.postsCount7Days}` : '10+';
-        badgesHTML += `<span class="badge badge-warning" title="Noisy Poster: Writes high frequency of posts/reposts (${countStr} in last 7 days)">NOISY</span>`;
+        badgesHTML += `<span class="badge badge-warning" title="Noisy Poster: High volume of posts, replies and reposts (${escapeHTML(countStr)} in last 7 days)">NOISY</span>`;
         warningsCount++;
       }
 
@@ -837,12 +1046,12 @@ function renderDashboard(resetSelection = true) {
         warningsCount++;
       }
 
-      if (isUserMassFollower(item)) {
+      if (isUserMassFollower(item, state.params.massFollowerThreshold)) {
         const followsCountStr =
           item.criteria.followsCount !== undefined
             ? `${item.criteria.followsCount.toLocaleString()}`
             : '3,500+';
-        badgesHTML += `<span class="badge badge-warning" title="Mass Follower: Follows ${followsCountStr} accounts on Bluesky">MASS FOLLOW</span>`;
+        badgesHTML += `<span class="badge badge-warning" title="Mass Follower: Follows ${escapeHTML(followsCountStr)} accounts on Bluesky">MASS FOLLOW</span>`;
         warningsCount++;
       }
 
@@ -863,7 +1072,9 @@ function renderDashboard(resetSelection = true) {
           '<span class="badge badge-warning" title="Social Outlier: Has 0 mutual follows in common with you on Bluesky">0 MUTUALS</span>';
         warningsCount++;
       } else if (item.criteria.mutualsCount > 0) {
-        badgesHTML += `<span class="badge badge-success" title="Mutual Social Graph: Has ${item.criteria.mutualsCount} mutual follows in common with you on Bluesky">${item.criteria.mutualsCount} MUTUALS</span>`;
+        const mutualsLabel = formatMutualsCount(item.criteria);
+        const mutualWord = item.criteria.mutualsCount === 1 ? 'MUTUAL' : 'MUTUALS';
+        badgesHTML += `<span class="badge badge-success" title="Mutual Social Graph: Has ${escapeHTML(mutualsLabel)} mutual follow${item.criteria.mutualsCount === 1 ? '' : 's'} in common with you on Bluesky">${escapeHTML(mutualsLabel)} ${mutualWord}</span>`;
       }
 
       if (warningsCount === 0) {
@@ -871,24 +1082,36 @@ function renderDashboard(resetSelection = true) {
           '<span class="badge badge-success" title="Meets all positive criteria checks">OK</span>';
       }
 
+      const isLocked = state.lockedDids.has(item.did);
+      if (isLocked) {
+        badgesHTML =
+          '<span class="badge badge-locked" title="Protected: This account is locked and excluded from Select All and unfollowing">🔒 LOCKED</span>' +
+          badgesHTML;
+      }
+
       // Score color class (0-5 scale: high score represents strong reason to unfollow)
       let scoreClass = 'score-high';
       if (item.score >= 4) scoreClass = 'score-low';
       else if (item.score >= 2) scoreClass = 'score-mid';
 
-      const avatarSrc =
-        item.avatar ||
+      const defaultAvatar =
         "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 24 24' fill='%23cbd5e1'><circle cx='12' cy='12' r='12'/></svg>";
+      const avatarSrc = item.avatar ? sanitizeUrl(item.avatar, defaultAvatar) : defaultAvatar;
+      const safeDid = escapeHTML(item.did);
+      const safeHandle = escapeHTML(item.handle);
+      const safeLabelName = escapeHTML(item.displayName || item.handle);
 
       const isUnfollowed = !item.followingUri;
       if (isUnfollowed) {
         row.classList.add('unfollowed-row');
+      } else if (isLocked) {
+        row.classList.add('locked-row');
       } else if (state.selectedDids.has(item.did)) {
         row.classList.add('selected-row');
       }
 
       const isLowFollowers = item.criteria.followersCount < state.params.lowFollowersThreshold;
-      const isPostInactive = item.dynamicInactive;
+      const isPostInactive = item.neverPosted || item.dynamicInactive;
 
       let isInteractionInactive = true;
       const lastInteractionDate = item.criteria.lastInteraction?.date || item.criteria.lastLikeDate;
@@ -901,11 +1124,12 @@ function renderDashboard(resetSelection = true) {
       // Generate Last Interaction content with type label and bsky.app hyperlink
       const interactionInfo = item.criteria.lastInteraction;
       const renderDate = interactionInfo?.date || item.criteria.lastLikeDate;
-      const relativeDateStr = formatRelativeDate(renderDate);
+      const relativeDateStr = escapeHTML(formatRelativeDate(renderDate));
 
       let cellContentHTML = relativeDateStr;
       if (renderDate && relativeDateStr !== 'Never') {
         let typeLabel = '';
+        const safeType = escapeHTML(interactionInfo?.type || '');
         if (interactionInfo?.type) {
           const typeMap = {
             like: 'Like',
@@ -913,12 +1137,12 @@ function renderDashboard(resetSelection = true) {
             repost: 'Repost',
             message: 'DM',
           };
-          typeLabel = ` (${typeMap[interactionInfo.type] || interactionInfo.type})`;
+          typeLabel = ` (${escapeHTML(typeMap[interactionInfo.type] || interactionInfo.type)})`;
         }
 
-        const linkUrl = interactionInfo?.link;
-        if (linkUrl) {
-          cellContentHTML = `<a href="${linkUrl}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline; text-underline-offset: 2px;" title="View last ${interactionInfo.type} on Bluesky">${relativeDateStr}${typeLabel}</a>`;
+        const safeLinkUrl = sanitizeUrl(interactionInfo?.link, '');
+        if (safeLinkUrl) {
+          cellContentHTML = `<a href="${safeLinkUrl}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline; text-underline-offset: 2px;" title="View last ${safeType} on Bluesky">${relativeDateStr}${typeLabel}</a>`;
         } else {
           cellContentHTML = `${relativeDateStr}${typeLabel}`;
         }
@@ -932,42 +1156,57 @@ function renderDashboard(resetSelection = true) {
         checkboxHTML =
           '<span class="text-muted text-center" style="display: block; opacity: 0.5;">—</span>';
       } else {
-        const checkedAttr = state.selectedDids.has(item.did) ? 'checked' : '';
-        checkboxHTML = `<input type="checkbox" class="row-checkbox" data-did="${item.did}" ${checkedAttr} aria-label="Select ${escapeHTML(item.displayName || item.handle)} for batch actions">`;
+        const checkedAttr = !isLocked && state.selectedDids.has(item.did) ? 'checked' : '';
+        const disabledAttr = isLocked ? 'disabled' : '';
+        const checkboxLabel = isLocked
+          ? `Account ${safeLabelName} is locked`
+          : `Select ${safeLabelName} for batch actions`;
+        const lockTitle = isLocked
+          ? 'Unlock account (allow selection and unfollowing)'
+          : 'Lock account (protect from Select All and unfollowing)';
+        const lockActionLabel = `${isLocked ? 'Unlock' : 'Lock'} ${safeLabelName}`;
+
+        checkboxHTML = `
+          <div class="cell-controls">
+            <input type="checkbox" class="row-checkbox" data-did="${safeDid}" ${checkedAttr} ${disabledAttr} aria-label="${checkboxLabel}">
+            <button type="button" class="lock-toggle-btn ${isLocked ? 'is-locked' : ''}" data-did="${safeDid}" title="${lockTitle}" aria-label="${lockActionLabel}" aria-pressed="${isLocked}">${isLocked ? '🔒' : '🔓'}</button>
+          </div>
+        `;
+      }
+
+      const unfollowDisabledAttr = isLocked ? 'disabled title="Unlock account to unfollow"' : '';
+      let actionButtonHTML;
+      if (isUnfollowed) {
+        actionButtonHTML = `<button class="btn btn-primary btn-sm refollow-single-btn" data-did="${safeDid}" data-handle="${safeHandle}" aria-label="Re-follow ${safeLabelName}">Re-follow</button>`;
+      } else {
+        actionButtonHTML = `<button class="btn btn-secondary btn-sm unfollow-single-btn" data-did="${safeDid}" data-handle="${safeHandle}" ${unfollowDisabledAttr} aria-label="Unfollow ${safeLabelName}">Unfollow</button>`;
       }
 
       row.innerHTML = `
         <td class="col-checkbox">
           ${checkboxHTML}
         </td>
-        <td>
+        <td class="col-profile">
           <div class="profile-cell" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">
-            <a href="https://bsky.app/profile/${item.handle}" target="_blank" rel="noopener noreferrer" class="profile-link">
-              <img class="avatar" src="${avatarSrc}" alt="${item.handle}" loading="lazy">
+            <a href="https://bsky.app/profile/${encodeURIComponent(item.handle)}" target="_blank" rel="noopener noreferrer" class="profile-link">
+              <img class="avatar" src="${avatarSrc}" alt="${safeHandle}" loading="lazy">
               <div class="profile-info">
                 <span class="display-name">${displayNameHTML}</span>
                 <span class="handle">${handleHTML}</span>
               </div>
             </a>
+            <button type="button" class="preview-btn" aria-label="Preview @${safeHandle}" aria-haspopup="dialog">ⓘ</button>
           </div>
         </td>
-        <td class="${isLowFollowers ? 'criteria-highlight' : ''}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${item.criteria.followersCount.toLocaleString()}</td>
-        <td class="${isPostInactive ? 'criteria-highlight' : ''}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${formatRelativeDate(item.criteria.lastPostDate)}</td>
-        <td class="${isInteractionInactive ? 'criteria-highlight' : ''}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${cellContentHTML}</td>
-        <td style="${isUnfollowed ? 'opacity: 0.5;' : ''}">
+        <td class="col-meta col-followers ${isLowFollowers ? 'criteria-highlight' : ''}" data-label="Followers" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${item.criteria.followersCount.toLocaleString()}</td>
+        <td class="col-meta col-last-post ${isPostInactive ? 'criteria-highlight' : ''}" data-label="Last post" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(formatRelativeDate(item.criteria.lastPostDate))}</td>
+        <td class="col-meta col-last-interaction ${isInteractionInactive ? 'criteria-highlight' : ''}" data-label="Last interaction" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${cellContentHTML}</td>
+        <td class="col-flags" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">
           <div class="flags-list">${isUnfollowed ? '<span class="badge badge-secondary">Unfollowed</span>' : badgesHTML}</div>
         </td>
-        <td class="score-cell ${scoreClass}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${item.score}</td>
-        <td class="text-right">
-          ${
-            isUnfollowed
-              ? `
-            <button class="btn btn-primary btn-sm refollow-single-btn" data-did="${item.did}" data-handle="${item.handle}" aria-label="Re-follow ${escapeHTML(item.displayName || item.handle)}">Re-follow</button>
-          `
-              : `
-            <button class="btn btn-secondary btn-sm unfollow-single-btn" data-did="${item.did}" data-handle="${item.handle}" aria-label="Unfollow ${escapeHTML(item.displayName || item.handle)}">Unfollow</button>
-          `
-          }
+        <td class="col-score score-cell ${scoreClass}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(item.score)}</td>
+        <td class="col-action text-right">
+          ${actionButtonHTML}
         </td>
       `;
 
@@ -978,7 +1217,24 @@ function renderDashboard(resetSelection = true) {
           await handleRefollow(did, handle, e.target);
         });
       } else {
+        const lockBtn = row.querySelector('.lock-toggle-btn');
+        if (lockBtn) {
+          lockBtn.addEventListener('click', async () => {
+            if (state.lockedDids.has(item.did)) {
+              state.lockedDids.delete(item.did);
+            } else {
+              state.lockedDids.add(item.did);
+              state.selectedDids.delete(item.did);
+            }
+            if (state.user) {
+              await syncCache.setLockedDids(state.user.did, Array.from(state.lockedDids));
+            }
+            renderDashboard(false);
+          });
+        }
+
         row.querySelector('.row-checkbox').addEventListener('change', (e) => {
+          if (state.lockedDids.has(item.did)) return;
           if (e.target.checked) {
             state.selectedDids.add(item.did);
           } else {
@@ -989,8 +1245,28 @@ function renderDashboard(resetSelection = true) {
         });
 
         row.querySelector('.unfollow-single-btn').addEventListener('click', async (e) => {
+          if (state.lockedDids.has(item.did)) return;
           const did = e.target.dataset.did;
           await executeUnfollow([did], e.target);
+        });
+      }
+
+      const profileCell = row.querySelector('.profile-cell');
+      row.querySelector('.preview-btn')?.addEventListener('click', () => {
+        hideHoverCardImmediately();
+        showPreviewSheet(item);
+      });
+      if (profileCell && hoverCard) {
+        profileCell.addEventListener('mouseenter', () => {
+          clearTimeout(hoverHideTimeout);
+          clearTimeout(hoverShowTimeout);
+          hoverShowTimeout = setTimeout(() => {
+            showHoverCard(item, profileCell);
+          }, 180);
+        });
+        profileCell.addEventListener('mouseleave', () => {
+          clearTimeout(hoverShowTimeout);
+          scheduleHideHoverCard();
         });
       }
 
@@ -1052,13 +1328,16 @@ function renderDashboard(resetSelection = true) {
 }
 
 function renderCheckboxHeaders(pageItems) {
-  if (pageItems.length === 0) {
+  const selectableItems = pageItems.filter(
+    (item) => Boolean(item.followingUri) && !state.lockedDids.has(item.did),
+  );
+  if (selectableItems.length === 0) {
     selectAllCheckbox.checked = false;
     selectAllCheckbox.disabled = true;
     return;
   }
   selectAllCheckbox.disabled = false;
-  const allPageDidsSelected = pageItems.every((item) => state.selectedDids.has(item.did));
+  const allPageDidsSelected = selectableItems.every((item) => state.selectedDids.has(item.did));
   selectAllCheckbox.checked = allPageDidsSelected;
 }
 
@@ -1066,12 +1345,14 @@ function handleSelectAllToggle(e) {
   const list = getFilteredAndSortedList();
   const startIdx = (state.pagination.currentPage - 1) * state.pagination.pageSize;
   const endIdx = Math.min(startIdx + state.pagination.pageSize, list.length);
-  const pageItems = list.slice(startIdx, endIdx);
+  const selectableItems = list
+    .slice(startIdx, endIdx)
+    .filter((item) => Boolean(item.followingUri) && !state.lockedDids.has(item.did));
 
   if (e.target.checked) {
-    pageItems.forEach((item) => state.selectedDids.add(item.did));
+    selectableItems.forEach((item) => state.selectedDids.add(item.did));
   } else {
-    pageItems.forEach((item) => state.selectedDids.delete(item.did));
+    selectableItems.forEach((item) => state.selectedDids.delete(item.did));
   }
   renderDashboard(false);
 }
@@ -1079,6 +1360,9 @@ function handleSelectAllToggle(e) {
 function updateSelectedCounter() {
   const count = state.selectedDids.size;
   selectedCountSpan.textContent = count;
+  if (!batchUnfollowBtn.contains(selectedCountSpan)) {
+    batchUnfollowBtn.replaceChildren('Unfollow Selected (', selectedCountSpan, ')');
+  }
   if (count > 0) {
     batchUnfollowBtn.classList.remove('hidden');
     batchUnfollowBtn.disabled = false;
@@ -1090,18 +1374,26 @@ function updateSelectedCounter() {
 
 // --- Action Logic ---
 async function executeUnfollow(dids, buttonEl) {
+  const unlockedDids = dids.filter((did) => !state.lockedDids.has(did));
+  if (unlockedDids.length === 0) return;
+
   if (buttonEl) {
     buttonEl.disabled = true;
     buttonEl.textContent = 'unfollowing...';
   }
 
-  if (!buttonEl && dids.length > 0) {
+  if (!buttonEl && unlockedDids.length > 0) {
     batchUnfollowBtn.disabled = true;
     batchUnfollowBtn.textContent = 'Unfollowing...';
   }
 
   try {
-    const data = await batchUnfollow(state.agent, state.user.did, dids, onSyncUpdate);
+    const data = await atprotoApi.batchUnfollow(
+      state.agent,
+      state.user.did,
+      unlockedDids,
+      onSyncUpdate,
+    );
 
     // Mark successfully unfollowed DIDs as unfollowed in raw state list
     const successes = data.success || [];
@@ -1123,7 +1415,6 @@ async function executeUnfollow(dids, buttonEl) {
       buttonEl.textContent = 'Unfollow';
     }
   } finally {
-    batchUnfollowBtn.textContent = 'Unfollow Selected';
     updateSelectedCounter();
   }
 }
@@ -1133,7 +1424,7 @@ async function handleRefollow(did, handle, buttonEl) {
   buttonEl.textContent = 'Re-following...';
 
   try {
-    const data = await followUser(state.agent, state.user.did, did, onSyncUpdate);
+    const data = await atprotoApi.followUser(state.agent, state.user.did, did, onSyncUpdate);
 
     // Update in-memory following object's URI
     const f = state.followings.find((item) => item.did === did);
@@ -1260,28 +1551,6 @@ function formatRelativeDate(dateStr) {
   return date.toLocaleDateString(undefined, { year: '2-digit', month: 'short', day: 'numeric' });
 }
 
-function escapeHTML(str) {
-  if (!str) return '';
-  return str.replace(
-    /[&<>'"]/g,
-    (tag) =>
-      ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        "'": '&#39;',
-        '"': '&quot;',
-      })[tag] || tag,
-  );
-}
-
-function truncateText(text, maxLength) {
-  if (!text) return '';
-  if (text.length <= maxLength) return escapeHTML(text);
-  const truncated = text.substring(0, maxLength - 3) + '...';
-  return `<abbr title="${escapeHTML(text)}" style="text-decoration: none; cursor: help; border-bottom: none;">${escapeHTML(truncated)}</abbr>`;
-}
-
 function formatLastSynced(timestamp) {
   if (!timestamp) return 'Never synced';
   const date = new Date(timestamp);
@@ -1294,4 +1563,271 @@ function formatLastSynced(timestamp) {
       minute: '2-digit',
     })
   );
+}
+
+// --- Singleton Rich Hover Card Logic ---
+function scheduleHideHoverCard() {
+  clearTimeout(hoverHideTimeout);
+  hoverHideTimeout = setTimeout(() => {
+    hideHoverCardImmediately();
+  }, 150);
+}
+
+function hideHoverCardImmediately() {
+  clearTimeout(hoverShowTimeout);
+  clearTimeout(hoverHideTimeout);
+  activeHoverDid = null;
+  if (hoverCard) {
+    hoverCard.classList.add('hidden');
+  }
+}
+
+function positionHoverCard(anchorEl) {
+  if (!hoverCard || !anchorEl) return;
+  const rect = anchorEl.getBoundingClientRect();
+  const cardWidth = 340;
+  const cardHeight = hoverCard.offsetHeight || 240;
+  const margin = 10;
+
+  // Prefer placing to the right of the profile cell; fallback to aligned left below/above
+  let left = rect.right + margin;
+  if (left + cardWidth > window.innerWidth - margin) {
+    left = Math.max(margin, rect.left);
+  }
+
+  let top = rect.top - 8;
+  if (top + cardHeight > window.innerHeight - margin) {
+    top = Math.max(margin, window.innerHeight - cardHeight - margin);
+  }
+
+  hoverCard.style.left = `${Math.round(left)}px`;
+  hoverCard.style.top = `${Math.round(top)}px`;
+}
+
+function formatMutualsCount(criteria) {
+  const count = criteria?.mutualsCount || 0;
+  const isTenPlus = count > 10 || (count === 10 && criteria?.hasMoreMutuals !== false);
+  return isTenPlus ? '10+' : `${count}`;
+}
+
+function renderHoverCardHTML(item, isHydrating = false) {
+  const defaultAvatar =
+    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 24 24' fill='%23cbd5e1'><circle cx='12' cy='12' r='12'/></svg>";
+  const avatarSrc = item.avatar ? sanitizeUrl(item.avatar, defaultAvatar) : defaultAvatar;
+  const safeName = escapeHTML(item.displayName || item.handle);
+  const safeHandle = escapeHTML(item.handle);
+  const profileUrl = `https://bsky.app/profile/${encodeURIComponent(item.handle)}`;
+
+  const followsBadge = item.criteria?.isFollowingUser
+    ? '<span class="badge badge-success">FOLLOWS YOU</span>'
+    : '<span class="badge badge-secondary">DOES NOT FOLLOW</span>';
+
+  const followersStr = (item.criteria?.followersCount || 0).toLocaleString();
+  const followsStr = (item.criteria?.followsCount || 0).toLocaleString();
+  const postsStr = (item.criteria?.postsCount || 0).toLocaleString();
+
+  // 1. Bio section
+  let bioHTML;
+  if (isHydrating && !item.description) {
+    bioHTML = '<div class="hover-card-bio empty">Loading profile details...</div>';
+  } else if (item.description && item.description.trim()) {
+    bioHTML = `<div class="hover-card-bio">${escapeHTML(item.description.trim())}</div>`;
+  } else {
+    bioHTML = '<div class="hover-card-bio empty">No bio provided</div>';
+  }
+
+  // 2. Common Followers (Mutuals) section
+  const mutualsCount = item.criteria?.mutualsCount || 0;
+  const mutualsLabel = formatMutualsCount(item.criteria);
+  const isTenPlus = mutualsLabel === '10+';
+  const mutualsList = item.preview?.mutuals || [];
+  let mutualsHTML;
+  if (mutualsCount > 0 || mutualsList.length > 0) {
+    const avatarsHTML = mutualsList
+      .slice(0, 4)
+      .map((m) => {
+        const mAvatar = m.avatar ? sanitizeUrl(m.avatar, defaultAvatar) : defaultAvatar;
+        return `<img src="${mAvatar}" alt="${escapeHTML(m.handle)}" loading="lazy">`;
+      })
+      .join('');
+
+    const names = mutualsList.slice(0, 2).map((m) => `@${escapeHTML(m.handle)}`);
+    const baseCount = Math.min(mutualsCount, 10);
+    const extraCount = Math.max(0, baseCount - names.length);
+    const extraSuffix = isTenPlus ? '+' : '';
+    let summaryText;
+    if (names.length > 0) {
+      summaryText = `Followed by ${names.join(', ')}`;
+      if (extraCount > 0) {
+        summaryText += ` + ${extraCount}${extraSuffix} other${extraCount > 1 ? 's' : ''} you follow`;
+      }
+    } else {
+      summaryText = `Followed by ${mutualsLabel} account${mutualsCount === 1 ? '' : 's'} you follow`;
+    }
+
+    mutualsHTML = `
+      <div class="hover-card-section">
+        <div class="hover-card-section-label">
+          <span>Common Followers</span>
+          <span>${mutualsLabel} mutual${mutualsCount === 1 ? '' : 's'}</span>
+        </div>
+        <div class="hover-card-mutuals">
+          ${avatarsHTML ? `<div class="hover-card-mutual-avatars">${avatarsHTML}</div>` : ''}
+          <span>${summaryText}</span>
+        </div>
+      </div>
+    `;
+  } else {
+    mutualsHTML = `
+      <div class="hover-card-section">
+        <div class="hover-card-section-label"><span>Common Followers</span><span>0 mutuals</span></div>
+        <div class="hover-card-mutuals"><span>No mutual followers in common</span></div>
+      </div>
+    `;
+  }
+
+  // 3. Latest activity section (posts, replies and reposts all count as activity)
+  const lastPost = item.preview?.lastPost;
+  const lastPostDateStr = escapeHTML(
+    formatRelativeDate(lastPost?.date || item.criteria?.lastPostDate),
+  );
+  const activityLabels = { post: 'Latest Post', reply: 'Latest Reply', repost: 'Latest Repost' };
+  const activityLabel = activityLabels[lastPost?.kind] || 'Latest Activity';
+  let postHTML;
+  if (lastPost && lastPost.text) {
+    const safePostUrl = sanitizeUrl(lastPost.uri, profileUrl);
+    const likes = (lastPost.likeCount || 0).toLocaleString();
+    const reposts = (lastPost.repostCount || 0).toLocaleString();
+    const repostOfHTML =
+      lastPost.kind === 'repost' && lastPost.originalAuthor
+        ? `<div class="hover-card-post-meta"><span>↻ Reposted from @${escapeHTML(lastPost.originalAuthor)}</span></div>`
+        : '';
+    postHTML = `
+      <div class="hover-card-section">
+        <div class="hover-card-section-label">
+          <span>${activityLabel}</span>
+          <span>${lastPostDateStr}</span>
+        </div>
+        <div class="hover-card-post">
+          ${repostOfHTML}
+          <div class="hover-card-post-text">${escapeHTML(lastPost.text)}</div>
+          <div class="hover-card-post-meta">
+            <span>♥ ${likes} · ↻ ${reposts}</span>
+            <a href="${safePostUrl}" target="_blank" rel="noopener noreferrer">View post ↗</a>
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (item.criteria?.lastPostDate) {
+    postHTML = `
+      <div class="hover-card-section">
+        <div class="hover-card-section-label">
+          <span>${activityLabel}</span>
+          <span>${lastPostDateStr}</span>
+        </div>
+        <div class="hover-card-post-meta">
+          <span>${isHydrating ? 'Fetching post snippet...' : 'No text content (media only)'}</span>
+          <a href="${profileUrl}" target="_blank" rel="noopener noreferrer">View feed ↗</a>
+        </div>
+      </div>
+    `;
+  } else {
+    postHTML = `
+      <div class="hover-card-section">
+        <div class="hover-card-section-label"><span>Latest Activity</span><span>Never</span></div>
+        <div class="hover-card-mutuals"><span>No posts, replies or reposts found</span></div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="hover-card-header">
+      <img class="hover-card-avatar" src="${avatarSrc}" alt="${safeHandle}">
+      <div class="hover-card-identity">
+        <div class="hover-card-name-row">
+          <a href="${profileUrl}" target="_blank" rel="noopener noreferrer" class="hover-card-name">${safeName}</a>
+          ${followsBadge}
+        </div>
+        <span class="hover-card-handle">@${safeHandle}</span>
+      </div>
+    </div>
+    <div class="hover-card-stats">
+      <span><strong>${followersStr}</strong> Followers</span>
+      <span><strong>${followsStr}</strong> Following</span>
+      <span><strong>${postsStr}</strong> Posts</span>
+    </div>
+    ${bioHTML}
+    ${mutualsHTML}
+    ${postHTML}
+  `;
+}
+
+function needsPreviewHydration(rawItem) {
+  return (
+    rawItem.description === undefined &&
+    (!rawItem.preview ||
+      (!rawItem.preview.lastPost &&
+        (!rawItem.preview.mutuals || rawItem.preview.mutuals.length === 0)))
+  );
+}
+
+/** Lazily fetches bio, mutuals and latest post for an account, mutating it in place. */
+async function hydratePreview(rawItem) {
+  if (!atprotoApi || !state.agent || !state.user) return false;
+  const enriched = await atprotoApi.fetchAccountPreview(state.agent, state.user.did, rawItem.did);
+  rawItem.description = enriched.description;
+  rawItem.preview = enriched.preview;
+  if (enriched.mutualsCount !== undefined && rawItem.criteria) {
+    rawItem.criteria.mutualsCount = enriched.mutualsCount;
+    rawItem.criteria.hasMoreMutuals = enriched.hasMoreMutuals;
+  }
+  return true;
+}
+
+async function showHoverCard(item, anchorEl) {
+  if (!hoverCard) return;
+  activeHoverDid = item.did;
+
+  const rawItem = state.followings.find((f) => f.did === item.did) || item;
+  const needsHydration = needsPreviewHydration(rawItem);
+
+  hoverCard.innerHTML = renderHoverCardHTML(rawItem, needsHydration);
+  hoverCard.classList.remove('hidden');
+  positionHoverCard(anchorEl);
+
+  if (needsHydration) {
+    try {
+      const hydrated = await hydratePreview(rawItem);
+      if (hydrated && activeHoverDid === rawItem.did && !hoverCard.classList.contains('hidden')) {
+        hoverCard.innerHTML = renderHoverCardHTML(rawItem, false);
+        positionHoverCard(anchorEl);
+      }
+    } catch (err) {
+      console.warn('Could not lazily hydrate hover preview:', err);
+    }
+  }
+}
+
+/** Touch devices have no hover, so the same preview opens as a modal bottom sheet. */
+async function showPreviewSheet(item) {
+  const sheet = document.getElementById('preview-sheet');
+  const content = document.getElementById('preview-sheet-content');
+  if (!sheet || !content) return;
+
+  const rawItem = state.followings.find((f) => f.did === item.did) || item;
+  const needsHydration = needsPreviewHydration(rawItem);
+  sheet.dataset.did = rawItem.did;
+  content.innerHTML = renderHoverCardHTML(rawItem, needsHydration);
+  if (!sheet.open) sheet.showModal();
+
+  if (needsHydration) {
+    try {
+      const hydrated = await hydratePreview(rawItem);
+      if (hydrated && sheet.open && sheet.dataset.did === rawItem.did) {
+        content.innerHTML = renderHoverCardHTML(rawItem, false);
+      }
+    } catch (err) {
+      console.warn('Could not lazily hydrate preview sheet:', err);
+    }
+  }
 }

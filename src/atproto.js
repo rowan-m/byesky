@@ -1,88 +1,16 @@
-import { BrowserOAuthClient, atprotoLoopbackClientMetadata } from '@atproto/oauth-client-browser';
 import { Agent } from '@atproto/api';
 import { syncCache } from './cache.js';
+import { isSevereLabel, atUriToBskyUrl, summariseAuthorActivity } from './scoring.js';
 
 // Simple sleep helper
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Helper to identify severe moderation flags / actions
-const SEVERE_LABELS = new Set([
-  'spam',
-  'impersonation',
-  'scam',
-  'deceptive',
-  'misleading',
-  'harassment',
-  'hate',
-  'intolerance',
-  'threat',
-  'rude',
-  'abuse',
-  'violation',
-  'banned',
-  'suspended',
-]);
-
-function isSevereLabel(labelVal) {
-  if (!labelVal) return false;
-  const val = labelVal.toLowerCase();
-  // Protocol global severe actions (e.g. !hide, !warn)
-  if (val === '!hide' || val === '!warn') return true;
-  return SEVERE_LABELS.has(val);
-}
-
-function atUriToBskyUrl(atUri) {
-  if (!atUri || !atUri.startsWith('at://')) return null;
-  const parts = atUri.replace('at://', '').split('/');
-  const did = parts[0];
-  const collection = parts[1]; // e.g. app.bsky.feed.post
-  const rkey = parts[2]; // e.g. 3mv5fw5biui26
-  if (did && collection === 'app.bsky.feed.post' && rkey) {
-    return `https://bsky.app/profile/${did}/post/${rkey}`;
-  }
-  return `https://bsky.app/profile/${did}`;
-}
-
-export let oauthClient = null;
-
 /**
- * Initializes and returns the `@atproto/oauth-client-browser` instance dynamically
- * using the current window's origin (supporting both development loopback and production hosting).
+ * Creates an ATProto Agent from an OAuth session or `{ service }` options.
+ * Exposed so callers can use Agent without statically importing @atproto/api.
  */
-export function initOAuthClient() {
-  if (oauthClient) return oauthClient;
-
-  const origin = window.location.origin;
-  const redirectUri = origin + '/';
-
-  // For localhost / local loopback, use the special Client ID format with query parameters
-  const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1');
-
-  if (isLocal) {
-    const clientId = `http://localhost?redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent('atproto transition:generic repo:app.bsky.graph.follow')}`;
-    oauthClient = new BrowserOAuthClient({
-      handleResolver: 'https://bsky.social',
-      clientMetadata: atprotoLoopbackClientMetadata(clientId),
-    });
-  } else {
-    oauthClient = new BrowserOAuthClient({
-      handleResolver: 'https://bsky.social',
-      clientMetadata: {
-        client_id: `${origin}/client-metadata.json`,
-        client_name: 'ByeSky',
-        client_uri: origin,
-        redirect_uris: [redirectUri],
-        scope: 'atproto transition:generic repo:app.bsky.graph.follow',
-        grant_types: ['authorization_code', 'refresh_token'],
-        response_types: ['code'],
-        token_endpoint_auth_method: 'none',
-        application_type: 'web',
-        dpop_bound_access_tokens: true,
-      },
-    });
-  }
-
-  return oauthClient;
+export function createAgent(sessionOrOptions) {
+  return new Agent(sessionOrOptions);
 }
 
 /**
@@ -138,8 +66,6 @@ async function fetchWithBackoff(userDid, apiCallFn, onUpdate) {
           undefined,
           `Rate limit hit! Pausing for ${seconds}s to avoid blocks...`,
         );
-        // Save state and notify UI
-        await syncCache.set(userDid, {});
         if (onUpdate) onUpdate();
 
         await sleep(backoffMs);
@@ -261,8 +187,13 @@ async function runSync(agent, userDid, onUpdate) {
       did: f.did,
       handle: f.handle,
       displayName: f.displayName || '',
+      description: (f.description || '').slice(0, 300),
       avatar: f.avatar || '',
       followingUri: f.viewer?.following || null,
+      preview: {
+        mutuals: [],
+        lastPost: null,
+      },
       criteria: {
         isDeleted: false,
         isBanned: false,
@@ -369,7 +300,11 @@ async function runSync(agent, userDid, onUpdate) {
     if (agent.api.chat && agent.api.chat.bsky && agent.api.chat.bsky.convo) {
       const convos = await fetchWithBackoff(
         userDid,
-        () => agent.api.chat.bsky.convo.listConvos({ limit: 50 }),
+        () =>
+          agent.api.chat.bsky.convo.listConvos(
+            { limit: 50 },
+            { headers: { 'atproto-proxy': 'did:web:api.bsky.chat#bsky_chat' } },
+          ),
         onUpdate,
       );
       if (convos.data && convos.data.convos) {
@@ -387,7 +322,7 @@ async function runSync(agent, userDid, onUpdate) {
                   member.did,
                   msgDate,
                   'message',
-                  `https://bsky.app/messages/convo/${convo.id}`,
+                  `https://bsky.app/messages/convo/${encodeURIComponent(convo.id)}`,
                 );
               }
             }
@@ -507,10 +442,16 @@ async function runSync(agent, userDid, onUpdate) {
           if (targetDid && targetDid.startsWith('did:') && targetDid !== userDid) {
             userOutboundInteractions.add(targetDid);
 
-            // Record the date of Rowan's last like to this user
+            // Record the latest like date to this user
             const likeDate = record.value?.createdAt;
-            if (likeDate && !outboundLikesMap.has(targetDid)) {
-              outboundLikesMap.set(targetDid, likeDate);
+            if (likeDate) {
+              const existingLikeDate = outboundLikesMap.get(targetDid);
+              if (
+                !existingLikeDate ||
+                new Date(likeDate).getTime() > new Date(existingLikeDate).getTime()
+              ) {
+                outboundLikesMap.set(targetDid, likeDate);
+              }
               updateInteraction(targetDid, likeDate, 'like', atUriToBskyUrl(subjectUri));
             }
           }
@@ -595,6 +536,7 @@ async function runSync(agent, userDid, onUpdate) {
         for (const f of batch) {
           const p = profilesMap.get(f.did);
           if (p) {
+            f.description = (p.description || f.description || '').slice(0, 300);
             f.criteria.followersCount = p.followersCount || 0;
             f.criteria.followsCount = p.followsCount || 0;
             f.criteria.postsCount = p.postsCount || 0;
@@ -651,40 +593,28 @@ async function runSync(agent, userDid, onUpdate) {
       // Spacing delay between consecutive calls = 300ms per worker
       await sleep(300);
 
-      // 1. Get latest post timestamp and calculate posting frequency (Noisy Poster check - posts only, no replies)
+      // 1. Latest activity and 7-day frequency (Never Posted / Inactive / Noisy Poster).
+      // Posts, replies and reposts all count, so fetch the unfiltered feed. Don't gate on
+      // the profile's postsCount: it excludes reposts, so repost-only accounts would be
+      // wrongly treated as never having posted.
       try {
-        if (f.criteria.postsCount > 0) {
-          const feedRes = await fetchWithBackoff(
-            userDid,
-            () =>
-              appViewAgent.api.app.bsky.feed.getAuthorFeed({
-                actor: f.did,
-                limit: 100,
-                filter: 'posts_no_replies',
-              }),
-            onUpdate,
-          );
+        const feedRes = await fetchWithBackoff(
+          userDid,
+          () =>
+            appViewAgent.api.app.bsky.feed.getAuthorFeed({
+              actor: f.did,
+              limit: 100,
+            }),
+          onUpdate,
+        );
 
-          const posts = feedRes.data.feed || [];
-          if (posts.length > 0) {
-            const lastPost = posts[0].post;
-            f.criteria.lastPostDate = lastPost.indexedAt || lastPost.record?.createdAt || null;
-
-            // Count posts/reposts in the last 7 days
-            const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-            let postsInLast7Days = 0;
-            for (const feedItem of posts) {
-              const postDateStr = feedItem.post.indexedAt || feedItem.post.record?.createdAt;
-              if (postDateStr) {
-                const postTime = new Date(postDateStr).getTime();
-                if (postTime > sevenDaysAgo) {
-                  postsInLast7Days++;
-                }
-              }
-            }
-            f.criteria.postsCount7Days = postsInLast7Days;
-            f.criteria.isNoisy = postsInLast7Days >= 20;
-          }
+        const activity = summariseAuthorActivity(feedRes.data.feed || []);
+        f.criteria.lastPostDate = activity.lastPostDate;
+        f.criteria.postsCount7Days = activity.postsCount7Days;
+        f.criteria.isNoisy = activity.postsCount7Days >= 20;
+        if (activity.lastPost) {
+          f.preview = f.preview || { mutuals: [], lastPost: null };
+          f.preview.lastPost = activity.lastPost;
         }
       } catch (err) {
         if (err.message === 'Sync cancelled') throw err;
@@ -712,13 +642,21 @@ async function runSync(agent, userDid, onUpdate) {
           () =>
             pdsAgent.api.app.bsky.graph.getKnownFollowers({
               actor: f.did,
-              limit: 10,
+              limit: 11,
             }),
           onUpdate,
         );
         const mutuals = mutualsRes.data.followers || [];
         f.criteria.mutualsCount = mutuals.length;
+        f.criteria.hasMoreMutuals = mutuals.length > 10;
         f.criteria.isOutlier = mutuals.length === 0;
+        f.preview = f.preview || { mutuals: [], lastPost: null };
+        f.preview.mutuals = mutuals.slice(0, 5).map((m) => ({
+          did: m.did,
+          handle: m.handle,
+          displayName: m.displayName || m.handle,
+          avatar: m.avatar || '',
+        }));
       } catch (err) {
         if (err.message === 'Sync cancelled') throw err;
         console.warn(
@@ -736,8 +674,8 @@ async function runSync(agent, userDid, onUpdate) {
             idx + 1,
             totalFollows,
             `Analyzing activity (${idx + 1}/${totalFollows})...`,
+            { followings: followingsList },
           );
-          await syncCache.set(userDid, { followings: followingsList });
           if (onUpdate) onUpdate();
         }
       }
@@ -760,21 +698,21 @@ async function runSync(agent, userDid, onUpdate) {
   if (cancelCheckEnd.status === 'cancelled') return;
 
   // Completed sync
-  await syncCache.set(userDid, {
-    status: 'completed',
-    followings: followingsList,
-  });
   await syncCache.updateProgress(
     userDid,
     totalFollows,
     totalFollows,
     'Analysis completed successfully.',
+    {
+      status: 'completed',
+      followings: followingsList,
+    },
   );
   if (onUpdate) onUpdate();
 }
 
 /**
- * Unfollows a list of DIDs.
+ * Unfollows a list of DIDs using batched com.atproto.repo.applyWrites operations.
  */
 export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
   const cached = await syncCache.get(userDid);
@@ -788,6 +726,8 @@ export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
     failed: [],
   };
 
+  const pendingDeletes = [];
+
   for (const did of targetDids) {
     const f = followingsMap.get(did);
     if (!f) {
@@ -796,23 +736,64 @@ export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
     }
 
     try {
-      if (f.followingUri) {
-        await pdsAgent.deleteFollow(f.followingUri);
-      } else {
+      let followingUri = f.followingUri;
+      if (!followingUri) {
         const profile = await agent.api.app.bsky.actor.getProfile({ actor: did });
-        if (profile.data.viewer?.following) {
-          await pdsAgent.deleteFollow(profile.data.viewer.following);
-        } else {
-          throw new Error('Not currently following this user');
-        }
+        followingUri = profile.data.viewer?.following || null;
       }
 
-      f.followingUri = null;
-      f.criteria.isBlocked = false;
-      results.success.push(did);
+      if (!followingUri) {
+        results.failed.push({ did, error: 'Not currently following this user' });
+        continue;
+      }
+
+      const rkey = followingUri.split('/').pop();
+      if (!rkey) {
+        results.failed.push({ did, error: 'Invalid follow record URI' });
+        continue;
+      }
+
+      pendingDeletes.push({ did, f, followingUri, rkey });
     } catch (err) {
-      console.error(`Error unfollowing ${f.handle || did}:`, err);
+      console.error(`Error resolving follow URI for ${f.handle || did}:`, err);
       results.failed.push({ did, error: err.message });
+    }
+  }
+
+  const chunkSize = 100;
+  for (let i = 0; i < pendingDeletes.length; i += chunkSize) {
+    const chunk = pendingDeletes.slice(i, i + chunkSize);
+    try {
+      await pdsAgent.com.atproto.repo.applyWrites({
+        repo: userDid,
+        writes: chunk.map((item) => ({
+          $type: 'com.atproto.repo.applyWrites#delete',
+          collection: 'app.bsky.graph.follow',
+          rkey: item.rkey,
+        })),
+      });
+
+      for (const item of chunk) {
+        item.f.followingUri = null;
+        item.f.criteria.isBlocked = false;
+        results.success.push(item.did);
+      }
+    } catch (batchErr) {
+      console.warn(
+        'Batch applyWrites failed, falling back to individual deleteFollow calls:',
+        batchErr,
+      );
+      for (const item of chunk) {
+        try {
+          await pdsAgent.deleteFollow(item.followingUri);
+          item.f.followingUri = null;
+          item.f.criteria.isBlocked = false;
+          results.success.push(item.did);
+        } catch (err) {
+          console.error(`Error unfollowing ${item.f.handle || item.did}:`, err);
+          results.failed.push({ did: item.did, error: err.message });
+        }
+      }
     }
   }
 
@@ -842,4 +823,66 @@ export async function followUser(agent, userDid, targetDid, onUpdate) {
   if (onUpdate) onUpdate();
 
   return { did: targetDid, followingUri: response.uri };
+}
+
+/**
+ * Lazily hydrates a single account's preview data (bio, common followers, most recent post)
+ * if hovering an account from an older cache before a full resync.
+ */
+export async function fetchAccountPreview(agent, userDid, targetDid) {
+  const appViewAgent = new Agent({
+    service: 'https://api.bsky.app',
+    session: agent.sessionManager,
+  });
+
+  const [profileRes, feedRes, mutualsRes] = await Promise.allSettled([
+    appViewAgent.api.app.bsky.actor.getProfile({ actor: targetDid }),
+    appViewAgent.api.app.bsky.feed.getAuthorFeed({
+      actor: targetDid,
+      limit: 1,
+    }),
+    agent.api.app.bsky.graph.getKnownFollowers({
+      actor: targetDid,
+      limit: 11,
+    }),
+  ]);
+
+  const description =
+    profileRes.status === 'fulfilled'
+      ? (profileRes.value.data?.description || '').slice(0, 300)
+      : '';
+
+  const lastPost =
+    feedRes.status === 'fulfilled'
+      ? summariseAuthorActivity(feedRes.value.data?.feed || []).lastPost
+      : null;
+
+  let mutuals = [];
+  let mutualsCount;
+  let hasMoreMutuals;
+  if (mutualsRes.status === 'fulfilled') {
+    const rawMutuals = mutualsRes.value.data?.followers || [];
+    mutualsCount = rawMutuals.length;
+    hasMoreMutuals = rawMutuals.length > 10;
+    mutuals = rawMutuals.slice(0, 5).map((m) => ({
+      did: m.did,
+      handle: m.handle,
+      displayName: m.displayName || m.handle,
+      avatar: m.avatar || '',
+    }));
+  }
+
+  const cached = await syncCache.get(userDid);
+  const target = cached.followings.find((item) => item.did === targetDid);
+  if (target) {
+    target.description = description;
+    target.preview = { mutuals, lastPost };
+    if (mutualsCount !== undefined && target.criteria) {
+      target.criteria.mutualsCount = mutualsCount;
+      target.criteria.hasMoreMutuals = hasMoreMutuals;
+    }
+    await syncCache.set(userDid, { followings: cached.followings });
+  }
+
+  return { description, preview: { mutuals, lastPost }, mutualsCount, hasMoreMutuals };
 }

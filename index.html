@@ -14,20 +14,27 @@
     <header class="app-header">
       <div class="header-container">
         <h1 class="logo"><span class="wave-emoji">👋</span> ByeSky</h1>
-        <div id="user-profile" class="hidden" style="display: flex; gap: 12px; align-items: center">
+        <div id="user-profile" class="header-actions hidden">
           <span id="user-handle" class="user-handle"></span>
-          <span
-            id="last-synced-time"
-            class="last-synced-time"
-            style="font-size: 0.85rem; color: var(--text-secondary)"
-          ></span>
-          <button id="resync-btn" class="btn btn-secondary">Resync Follow List</button>
+          <span id="last-synced-time" class="last-synced-time"></span>
+          <button id="resync-btn" class="btn btn-secondary" aria-label="Resync Follow List">
+            <span aria-hidden="true">⟳</span><span class="btn-label">Resync Follow List</span>
+          </button>
           <button id="logout-btn" class="btn btn-secondary">Log Out</button>
         </div>
       </div>
     </header>
 
     <main class="container">
+      <!-- Shown when the signed-in session is missing permissions added since it was granted -->
+      <div id="reauth-banner" class="reauth-banner hidden" role="alert">
+        <div class="reauth-banner-text">
+          <strong>ByeSky needs an extra permission.</strong>
+          <span id="reauth-banner-detail"></span>
+        </div>
+        <button type="button" id="reauth-btn" class="btn btn-primary btn-sm">Sign in again</button>
+      </div>
+
       <!-- App Loading State -->
       <section id="app-loading-section" class="card">
         <div class="spinner"></div>
@@ -93,215 +100,352 @@
       <!-- Section 3: Cleanup Dashboard -->
       <section id="dashboard-section" class="hidden">
         <div class="dashboard-grid">
-          <!-- Sidebar: Criteria Weights & Dynamic Filters -->
-          <aside class="sidebar card">
-            <h3>Scoring Criteria</h3>
-            <p class="section-desc">
-              Set weights for how much each item impacts the score (0-5 scale). Accounts with higher
-              scores represent stronger reasons to unfollow.
-            </p>
+          <!-- Sidebar: Unified Criteria Filters, Weights & Thresholds.
+               Expanded sidebar on wide screens (collapsible to a rail); collapsed bar on narrow screens. -->
+          <aside class="sidebar card" id="config-panel">
+            <button
+              type="button"
+              id="config-toggle"
+              class="sidebar-toggle"
+              aria-expanded="true"
+              aria-controls="config-body"
+            >
+              <span class="sidebar-toggle-title">Criteria &amp; Scoring</span>
+              <span id="config-summary" class="sidebar-toggle-summary"></span>
+              <span class="sidebar-toggle-chevron" aria-hidden="true"></span>
+            </button>
 
-            <div class="weights-group">
-              <!-- 1. Status / Account Vitality -->
-              <div class="slider-control">
-                <div class="slider-labels">
-                  <label for="weight-deleted-banned">Deleted or Banned</label>
-                  <span id="val-deleted-banned">4</span>
+            <div id="config-body" class="sidebar-body">
+              <div class="sidebar-legend-row">
+                <p class="section-desc">
+                  Toggle which accounts are shown and set each criterion's unfollow score weight.
+                </p>
+                <span class="sidebar-legend">Filter · Weight (0–5)</span>
+              </div>
+
+              <!-- Global Status Toggles (Non-scored) -->
+              <div class="status-toggles-bar">
+                <label class="checkbox-control status-pill">
+                  <input type="checkbox" id="filter-ok" checked />
+                  <span style="font-weight: 600; color: var(--success)">OK / Clean</span>
+                </label>
+                <label class="checkbox-control status-pill">
+                  <input type="checkbox" id="filter-locked" checked />
+                  <span style="font-weight: 600; color: var(--primary)">🔒 Locked</span>
+                </label>
+              </div>
+
+              <div class="criteria-list">
+                <!-- 1. Status & Moderation -->
+                <div class="criteria-group-title">Status &amp; Moderation</div>
+
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-deleted-banned">
+                      <input type="checkbox" id="filter-deleted-banned" checked />
+                      <span>Deleted or Banned</span>
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-deleted-banned"
+                        min="0"
+                        max="5"
+                        value="4"
+                        aria-label="Deleted or Banned weight"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <input type="range" id="weight-deleted-banned" min="0" max="5" value="4" />
-              </div>
 
-              <div class="slider-control">
-                <div class="slider-labels">
-                  <label for="weight-inactive">Inactive (No posts)</label>
-                  <span id="val-inactive">4</span>
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-inactive">
+                      <input type="checkbox" id="filter-inactive" checked />
+                      <span title="No posts, replies or reposts within the threshold"
+                        >Inactive</span
+                      >
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-inactive"
+                        min="0"
+                        max="5"
+                        value="3"
+                        aria-label="Inactive weight"
+                      />
+                    </div>
+                  </div>
+                  <div class="criteria-param">
+                    <label for="param-inactive-days">No posts in &gt;</label>
+                    <input type="number" id="param-inactive-days" value="180" min="7" max="730" />
+                    <span>days</span>
+                  </div>
                 </div>
-                <input type="range" id="weight-inactive" min="0" max="5" value="4" />
-              </div>
 
-              <div class="slider-control">
-                <div class="slider-labels">
-                  <label for="weight-muted">Muted Account</label>
-                  <span id="val-muted">4</span>
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-never-posted">
+                      <input type="checkbox" id="filter-never-posted" checked />
+                      <span title="No posts, replies or reposts at all">Never Posted</span>
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-never-posted"
+                        min="0"
+                        max="5"
+                        value="4"
+                        aria-label="Never Posted weight"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <input type="range" id="weight-muted" min="0" max="5" value="4" />
-              </div>
 
-              <div class="slider-control">
-                <div class="slider-labels">
-                  <label for="weight-flagged">Moderation Flags</label>
-                  <span id="val-flagged">3</span>
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-muted">
+                      <input type="checkbox" id="filter-muted" checked />
+                      <span>Muted Account</span>
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-muted"
+                        min="0"
+                        max="5"
+                        value="4"
+                        aria-label="Muted Account weight"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <input type="range" id="weight-flagged" min="0" max="5" value="3" />
-              </div>
 
-              <!-- 2. Interactions -->
-              <div class="slider-control">
-                <div class="slider-labels">
-                  <label for="weight-blocking">Blocking Me</label>
-                  <span id="val-blocking">4</span>
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-flagged">
+                      <input type="checkbox" id="filter-flagged" checked />
+                      <span>Moderation Flags</span>
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-flagged"
+                        min="0"
+                        max="5"
+                        value="3"
+                        aria-label="Moderation Flags weight"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <input type="range" id="weight-blocking" min="0" max="5" value="4" />
-              </div>
 
-              <div class="slider-control">
-                <div class="slider-labels">
-                  <label for="weight-not-following">Not Following Back</label>
-                  <span id="val-not-following">1</span>
+                <!-- 2. Interactions -->
+                <div class="criteria-group-title">Interactions</div>
+
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-blocking">
+                      <input type="checkbox" id="filter-blocking" checked />
+                      <span>Blocking Me</span>
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-blocking"
+                        min="0"
+                        max="5"
+                        value="4"
+                        aria-label="Blocking Me weight"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <input type="range" id="weight-not-following" min="0" max="5" value="1" />
-              </div>
 
-              <div class="slider-control">
-                <div class="slider-labels">
-                  <label for="weight-no-inbound">No Inbound Interaction (From Them)</label>
-                  <span id="val-no-inbound">1</span>
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-not-following">
+                      <input type="checkbox" id="filter-not-following" checked />
+                      <span>Not Following Back</span>
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-not-following"
+                        min="0"
+                        max="5"
+                        value="1"
+                        aria-label="Not Following Back weight"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <input type="range" id="weight-no-inbound" min="0" max="5" value="1" />
-              </div>
 
-              <div class="slider-control">
-                <div class="slider-labels">
-                  <label for="weight-no-outbound">No Outbound Interaction (From Me)</label>
-                  <span id="val-no-outbound">5</span>
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-no-inbound">
+                      <input type="checkbox" id="filter-no-inbound" checked />
+                      <span title="They haven't liked, replied, reposted, or messaged you"
+                        >No Inbound Contact</span
+                      >
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-no-inbound"
+                        min="0"
+                        max="5"
+                        value="1"
+                        aria-label="No Inbound Contact weight"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <input type="range" id="weight-no-outbound" min="0" max="5" value="5" />
-              </div>
 
-              <!-- 3. Social Graph / Connectivity -->
-              <div class="slider-control">
-                <div class="slider-labels">
-                  <label for="weight-outlier">Social Outlier (0 Mutuals)</label>
-                  <span id="val-outlier">1</span>
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-no-outbound">
+                      <input type="checkbox" id="filter-no-outbound" checked />
+                      <span title="You haven't liked, replied, reposted, or messaged them"
+                        >No Outbound Contact</span
+                      >
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-no-outbound"
+                        min="0"
+                        max="5"
+                        value="5"
+                        aria-label="No Outbound Contact weight"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <input type="range" id="weight-outlier" min="0" max="5" value="1" />
-              </div>
 
-              <div class="slider-control">
-                <div class="slider-labels">
-                  <label for="weight-mass-follower">Mass Follower</label>
-                  <span id="val-mass-follower">1</span>
+                <!-- 3. Social Graph -->
+                <div class="criteria-group-title">Social Graph</div>
+
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-outlier">
+                      <input type="checkbox" id="filter-outlier" checked />
+                      <span>0 Mutuals (Outlier)</span>
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-outlier"
+                        min="0"
+                        max="5"
+                        value="1"
+                        aria-label="0 Mutuals weight"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <input type="range" id="weight-mass-follower" min="0" max="5" value="1" />
-              </div>
 
-              <div class="slider-control">
-                <div class="slider-labels">
-                  <label for="weight-spammy-ratio">Spammy Ratio</label>
-                  <span id="val-spammy-ratio">1</span>
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-mass-follower">
+                      <input type="checkbox" id="filter-mass-follower" checked />
+                      <span>Mass Follower</span>
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-mass-follower"
+                        min="0"
+                        max="5"
+                        value="1"
+                        aria-label="Mass Follower weight"
+                      />
+                    </div>
+                  </div>
+                  <div class="criteria-param">
+                    <label for="param-mass-follower">Follows &ge;</label>
+                    <input
+                      type="number"
+                      id="param-mass-follower"
+                      value="3500"
+                      min="100"
+                      max="100000"
+                      step="100"
+                    />
+                    <span>accounts</span>
+                  </div>
                 </div>
-                <input type="range" id="weight-spammy-ratio" min="0" max="5" value="1" />
-              </div>
 
-              <!-- 4. Posting Activity -->
-              <div class="slider-control">
-                <div class="slider-labels">
-                  <label for="weight-noisy">Noisy Poster (High posts frequency)</label>
-                  <span id="val-noisy">1</span>
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-spammy-ratio">
+                      <input type="checkbox" id="filter-spammy-ratio" checked />
+                      <span>Spammy Ratio</span>
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-spammy-ratio"
+                        min="0"
+                        max="5"
+                        value="1"
+                        aria-label="Spammy Ratio weight"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <input type="range" id="weight-noisy" min="0" max="5" value="1" />
-              </div>
-            </div>
 
-            <hr class="divider" />
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-low-followers">
+                      <input type="checkbox" id="filter-low-followers" checked />
+                      <span>Low Followers</span>
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-low-followers"
+                        min="0"
+                        max="5"
+                        value="0"
+                        aria-label="Low Followers weight"
+                      />
+                    </div>
+                  </div>
+                  <div class="criteria-param">
+                    <label for="param-low-followers">Followers &lt;</label>
+                    <input type="number" id="param-low-followers" value="50" min="0" max="100000" />
+                    <span>accounts</span>
+                  </div>
+                </div>
 
-            <h3>Active Filters</h3>
-            <div class="filters-group">
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-ok" checked />
-                <span style="font-weight: 600; color: var(--success)">OK / Clean Accounts</span>
-              </label>
+                <!-- 4. Posting Activity -->
+                <div class="criteria-group-title">Posting Activity</div>
 
-              <!-- 1. Status / Account Vitality -->
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-deleted-banned" checked />
-                <span>Deleted or Banned</span>
-              </label>
-
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-inactive" checked />
-                <span>Inactive</span>
-              </label>
-              <div class="nested-control">
-                <label for="param-inactive-days">Inactive after (days):</label>
-                <input type="number" id="param-inactive-days" value="180" min="7" max="730" />
-              </div>
-
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-muted" checked />
-                <span>Muted Account</span>
-              </label>
-
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-flagged" checked />
-                <span>Moderation Flags</span>
-              </label>
-
-              <!-- 2. Interactions -->
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-blocking" checked />
-                <span>Blocking Me</span>
-              </label>
-
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-not-following" checked />
-                <span>Does Not Follow Back</span>
-              </label>
-
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-no-inbound" checked />
-                <span>They Haven't Interacted (Inbound)</span>
-              </label>
-
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-no-outbound" checked />
-                <span>I Haven't Interacted (Outbound)</span>
-              </label>
-
-              <!-- 3. Social Graph / Connectivity -->
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-outlier" checked />
-                <span>Social Outlier (0 Mutuals)</span>
-              </label>
-
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-mass-follower" checked />
-                <span>Mass Follower</span>
-              </label>
-              <div class="nested-control">
-                <label for="param-mass-follower">Follow threshold:</label>
-                <input
-                  type="number"
-                  id="param-mass-follower"
-                  value="3500"
-                  min="100"
-                  max="100000"
-                  step="100"
-                />
-              </div>
-
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-spammy-ratio" checked />
-                <span>Spammy Follow/Follower Ratio</span>
-              </label>
-
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-low-followers" checked />
-                <span>Low Followers</span>
-              </label>
-              <div class="nested-control">
-                <label for="param-low-followers">Follower threshold:</label>
-                <input type="number" id="param-low-followers" value="50" min="0" max="100000" />
-              </div>
-
-              <!-- 4. Posting Activity -->
-              <label class="checkbox-control">
-                <input type="checkbox" id="filter-noisy" checked />
-                <span>Noisy Poster (High frequency)</span>
-              </label>
-              <div class="nested-control">
-                <label for="param-noisy-posts">Post threshold (7 days):</label>
-                <input type="number" id="param-noisy-posts" value="20" min="1" max="100" />
+                <div class="criteria-item">
+                  <div class="criteria-row">
+                    <label class="checkbox-control" for="filter-noisy">
+                      <input type="checkbox" id="filter-noisy" checked />
+                      <span title="Posts, replies and reposts combined">Noisy Poster</span>
+                    </label>
+                    <div class="criteria-weight" title="Unfollow score weight (0-5)">
+                      <input
+                        type="range"
+                        id="weight-noisy"
+                        min="0"
+                        max="5"
+                        value="1"
+                        aria-label="Noisy Poster weight"
+                      />
+                    </div>
+                  </div>
+                  <div class="criteria-param">
+                    <label for="param-noisy-posts">Posts &ge;</label>
+                    <input type="number" id="param-noisy-posts" value="20" min="1" max="100" />
+                    <span>in 7 days</span>
+                  </div>
+                </div>
               </div>
             </div>
           </aside>
@@ -347,13 +491,13 @@
                         aria-label="Select all accounts on this page"
                       />
                     </th>
-                    <th>Profile</th>
+                    <th class="col-profile">Profile</th>
                     <th class="sortable" data-sort="followers">Followers</th>
                     <th class="sortable" data-sort="lastPost">Last Post</th>
                     <th class="sortable" data-sort="lastInteraction">Last Interaction</th>
-                    <th>Criteria Flags</th>
+                    <th class="col-flags">Criteria Flags</th>
                     <th class="sortable text-center" data-sort="score">Score</th>
-                    <th class="text-right">Action</th>
+                    <th class="col-action text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody id="table-body">
@@ -401,6 +545,18 @@
         </div>
       </div>
     </div>
+
+    <!-- Backdrop behind the expanded Criteria & Scoring sheet on narrow screens -->
+    <div id="config-backdrop" class="config-backdrop" hidden></div>
+
+    <!-- Singleton Rich Hover Preview Card -->
+    <div id="profile-hover-card" class="hover-card card hidden" role="tooltip"></div>
+
+    <!-- Account preview sheet for touch screens and keyboard users (no hover) -->
+    <dialog id="preview-sheet" class="preview-sheet" aria-label="Account preview">
+      <button type="button" class="preview-sheet-close" aria-label="Close preview">✕</button>
+      <div id="preview-sheet-content"></div>
+    </dialog>
 
     <script src="/src/main.js" type="module"></script>
   </body>
