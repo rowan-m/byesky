@@ -600,6 +600,16 @@ function setupConfigPanel() {
       document.documentElement.style.setProperty('--header-h', `${height}px`);
     }).observe(header);
   }
+
+  // Expose the panel's height so, on wide screens, a panel taller than the window sticks
+  // with its bottom in view instead of needing its own scrollbar.
+  const panel = document.getElementById('config-panel');
+  if (panel && 'ResizeObserver' in window) {
+    new window.ResizeObserver(([entry]) => {
+      const height = Math.ceil(entry.target.getBoundingClientRect().height);
+      document.documentElement.style.setProperty('--sidebar-h', `${height}px`);
+    }).observe(panel);
+  }
 }
 
 function updateConfigSummary() {

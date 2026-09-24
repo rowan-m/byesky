@@ -22,16 +22,39 @@ test('criteria panel controls are all reachable', async ({ page }) => {
   }
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
-  // Panel must fit the viewport, and the last control must be scrollable into view.
   const viewportHeight = page.viewportSize().height;
-  const box = await panel.boundingBox();
-  expect(box.y + box.height).toBeLessThanOrEqual(viewportHeight + 1);
+  if (isNarrow(page)) {
+    // Overlay sheet must fit the viewport (it scrolls internally).
+    const box = await panel.boundingBox();
+    expect(box.y + box.height).toBeLessThanOrEqual(viewportHeight + 1);
+  }
 
   const lastInput = body.locator('input').last();
   await lastInput.scrollIntoViewIfNeeded();
   const inputBox = await lastInput.boundingBox();
   expect(inputBox.y + inputBox.height).toBeLessThanOrEqual(viewportHeight + 1);
   await expect(lastInput).toBeInViewport();
+});
+
+test('wide panel has no inner scrollbar and its bottom sticks in view', async ({ page }) => {
+  test.skip(isNarrow(page), 'Wide layouts only');
+  // Short window so the panel is taller than the viewport.
+  await page.setViewportSize({ width: page.viewportSize().width, height: 600 });
+
+  const body = page.locator('#config-body');
+  const hasInnerScroll = await body.evaluate((el) => el.scrollHeight > el.clientHeight + 1);
+  expect(hasInnerScroll).toBe(false);
+
+  // Scroll well down the table: the panel's bottom should be pinned inside the viewport.
+  await page.mouse.move(page.viewportSize().width - 50, 300);
+  await page.mouse.wheel(0, 2000);
+  await expect
+    .poll(async () => {
+      const box = await page.locator('#config-panel').boundingBox();
+      return Math.round(box.y + box.height);
+    })
+    .toBeLessThanOrEqual(600);
+  await expect(body.locator('input').last()).toBeInViewport();
 });
 
 test('criteria panel still fits after scrolling the page', async ({ page }) => {

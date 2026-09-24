@@ -466,6 +466,21 @@ input[type='number']:focus {
   .is-config-collapsed .sidebar-toggle-chevron::before {
     content: '»';
   }
+
+  /*
+   * No inner scrollbar on wide screens: the panel takes its natural height. If it fits the
+   * window it sticks below the header; if it's taller, the offset goes negative so it
+   * scrolls with the page until its bottom is in view, then sticks there.
+   * --sidebar-h is measured in JS (setupConfigPanel).
+   */
+  .sidebar {
+    max-height: none;
+    top: min(calc(var(--header-h, 49px) + 12px), calc(100vh - var(--sidebar-h, 0px) - 12px));
+  }
+
+  .sidebar-body {
+    overflow-y: visible;
+  }
 }
 
 .sidebar-legend-row {
