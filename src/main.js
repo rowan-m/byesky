@@ -183,17 +183,17 @@ function setupEventListeners() {
   ];
   weights.forEach((w) => {
     const slider = document.getElementById(`weight-${w}`);
-    const valDisplay = document.getElementById(`val-${w}`);
 
     // Convert hyphenated back to camelCase for state
     const stateKey = w.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
 
     slider.addEventListener('input', (e) => {
       const val = parseInt(e.target.value, 10);
-      valDisplay.textContent = val;
       state.weights[stateKey] = val;
       renderDashboard(); // Re-render table and update scores instantly
     });
+
+    enhanceWeightControl(slider);
   });
 
   // Checkboxes Filters
@@ -228,9 +228,12 @@ function setupEventListeners() {
         parentItem.classList.toggle('is-filtered-out', !e.target.checked);
       }
       state.pagination.currentPage = 1; // Reset to page 1 on filter
+      updateConfigSummary();
       renderDashboard();
     });
   });
+
+  setupConfigPanel();
 
   // Parameters
   document.getElementById('param-inactive-days').addEventListener('input', (e) => {
@@ -368,6 +371,155 @@ function setupEventListeners() {
     },
     { passive: true },
   );
+}
+
+// --- Criteria & Scoring Panel ---
+const CONFIG_COLLAPSED_KEY = 'byesky:configCollapsed';
+// Keep in sync with the narrow-layout breakpoint in style.css.
+const narrowLayoutQuery = window.matchMedia('(max-width: 1100px)');
+
+/**
+ * Renders a 0–5 segmented radio group in place of a range slider. The (hidden) range
+ * input remains the source of truth, so existing `input` listeners keep working.
+ */
+function enhanceWeightControl(slider) {
+  const min = parseInt(slider.min, 10) || 0;
+  const max = parseInt(slider.max, 10) || 5;
+
+  const group = document.createElement('div');
+  group.className = 'weight-seg';
+  group.setAttribute('role', 'radiogroup');
+  group.setAttribute('aria-label', slider.getAttribute('aria-label') || 'Weight');
+
+  const buttons = [];
+  for (let v = min; v <= max; v++) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'weight-seg-btn';
+    btn.textContent = String(v);
+    btn.dataset.value = String(v);
+    btn.setAttribute('role', 'radio');
+    buttons.push(btn);
+    group.appendChild(btn);
+  }
+
+  const sync = () => {
+    const current = slider.value;
+    buttons.forEach((btn) => {
+      const isActive = btn.dataset.value === current;
+      btn.setAttribute('aria-checked', String(isActive));
+      btn.tabIndex = isActive ? 0 : -1; // roving tabindex
+    });
+  };
+
+  const select = (value, focus = false) => {
+    const clamped = Math.min(max, Math.max(min, value));
+    if (String(clamped) !== slider.value) {
+      slider.value = String(clamped);
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    sync();
+    if (focus) buttons[clamped - min].focus();
+  };
+
+  group.addEventListener('click', (e) => {
+    const btn = e.target.closest('.weight-seg-btn');
+    if (btn) select(parseInt(btn.dataset.value, 10));
+  });
+
+  group.addEventListener('keydown', (e) => {
+    const current = parseInt(slider.value, 10);
+    const keyMap = {
+      ArrowRight: current + 1,
+      ArrowUp: current + 1,
+      ArrowLeft: current - 1,
+      ArrowDown: current - 1,
+      Home: min,
+      End: max,
+    };
+    if (e.key in keyMap) {
+      e.preventDefault();
+      select(keyMap[e.key], true);
+    }
+  });
+
+  slider.classList.add('visually-hidden');
+  slider.tabIndex = -1;
+  slider.setAttribute('aria-hidden', 'true');
+  slider.insertAdjacentElement('afterend', group);
+  sync();
+}
+
+function readStoredConfigCollapsed() {
+  try {
+    return localStorage.getItem(CONFIG_COLLAPSED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function storeConfigCollapsed(collapsed) {
+  try {
+    localStorage.setItem(CONFIG_COLLAPSED_KEY, String(collapsed));
+  } catch {
+    // Storage unavailable (e.g. privacy mode); preference just won't persist.
+  }
+}
+
+function setConfigCollapsed(collapsed) {
+  document.querySelector('.dashboard-grid')?.classList.toggle('is-config-collapsed', collapsed);
+  document.getElementById('config-toggle')?.setAttribute('aria-expanded', String(!collapsed));
+}
+
+/** Narrow screens always start collapsed; wide screens restore the user's last choice. */
+function applyConfigLayout() {
+  setConfigCollapsed(narrowLayoutQuery.matches ? true : readStoredConfigCollapsed());
+}
+
+function setupConfigPanel() {
+  const toggle = document.getElementById('config-toggle');
+  const grid = document.querySelector('.dashboard-grid');
+  if (!toggle || !grid) return;
+
+  toggle.addEventListener('click', () => {
+    const collapsed = !grid.classList.contains('is-config-collapsed');
+    setConfigCollapsed(collapsed);
+    if (!narrowLayoutQuery.matches) storeConfigCollapsed(collapsed);
+  });
+
+  // Escape closes the expanded overlay-style panel on narrow screens.
+  document.addEventListener('keydown', (e) => {
+    if (
+      e.key === 'Escape' &&
+      narrowLayoutQuery.matches &&
+      !grid.classList.contains('is-config-collapsed')
+    ) {
+      setConfigCollapsed(true);
+      toggle.focus();
+    }
+  });
+
+  narrowLayoutQuery.addEventListener('change', applyConfigLayout);
+  applyConfigLayout();
+  updateConfigSummary();
+
+  // Expose the sticky header height so the sticky sidebar/top bar can sit beneath it.
+  const header = document.querySelector('.app-header');
+  if (header && 'ResizeObserver' in window) {
+    new window.ResizeObserver(([entry]) => {
+      const height = Math.ceil(entry.target.getBoundingClientRect().height);
+      document.documentElement.style.setProperty('--header-h', `${height}px`);
+    }).observe(header);
+  }
+}
+
+function updateConfigSummary() {
+  const summary = document.getElementById('config-summary');
+  if (!summary) return;
+  const hiddenCount = Object.values(state.filters).filter((shown) => !shown).length;
+  const plural = hiddenCount === 1 ? '' : 's';
+  summary.textContent = hiddenCount === 0 ? 'All shown' : `${hiddenCount} filter${plural} off`;
+  summary.classList.toggle('has-hidden', hiddenCount > 0);
 }
 
 function initializeStateFromDOM() {
@@ -859,7 +1011,7 @@ function renderDashboard(resetSelection = true) {
         <td class="col-checkbox">
           ${checkboxHTML}
         </td>
-        <td>
+        <td class="col-profile">
           <div class="profile-cell" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">
             <a href="https://bsky.app/profile/${encodeURIComponent(item.handle)}" target="_blank" rel="noopener noreferrer" class="profile-link">
               <img class="avatar" src="${avatarSrc}" alt="${safeHandle}" loading="lazy">
@@ -870,14 +1022,14 @@ function renderDashboard(resetSelection = true) {
             </a>
           </div>
         </td>
-        <td class="${isLowFollowers ? 'criteria-highlight' : ''}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${item.criteria.followersCount.toLocaleString()}</td>
-        <td class="${isPostInactive ? 'criteria-highlight' : ''}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(formatRelativeDate(item.criteria.lastPostDate))}</td>
-        <td class="${isInteractionInactive ? 'criteria-highlight' : ''}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${cellContentHTML}</td>
-        <td style="${isUnfollowed ? 'opacity: 0.5;' : ''}">
+        <td class="col-meta col-followers ${isLowFollowers ? 'criteria-highlight' : ''}" data-label="Followers" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${item.criteria.followersCount.toLocaleString()}</td>
+        <td class="col-meta col-last-post ${isPostInactive ? 'criteria-highlight' : ''}" data-label="Last post" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(formatRelativeDate(item.criteria.lastPostDate))}</td>
+        <td class="col-meta col-last-interaction ${isInteractionInactive ? 'criteria-highlight' : ''}" data-label="Last interaction" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${cellContentHTML}</td>
+        <td class="col-flags" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">
           <div class="flags-list">${isUnfollowed ? '<span class="badge badge-secondary">Unfollowed</span>' : badgesHTML}</div>
         </td>
-        <td class="score-cell ${scoreClass}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(item.score)}</td>
-        <td class="text-right">
+        <td class="col-score score-cell ${scoreClass}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(item.score)}</td>
+        <td class="col-action text-right">
           ${actionButtonHTML}
         </td>
       `;
