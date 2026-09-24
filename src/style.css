@@ -671,9 +671,14 @@ input[type='number']:focus {
     z-index: 300;
     max-height: calc(100vh - var(--config-panel-top, 0px) - 8px);
     max-height: calc(100dvh - var(--config-panel-top, 0px) - 8px);
-    box-shadow:
-      var(--shadow-md),
-      0 0 0 100vmax rgba(0, 0, 0, 0.35);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  }
+
+  .config-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 299;
+    background: rgba(0, 0, 0, 0.45);
   }
 
   /* Hold the bar's space in the flow so the table doesn't jump when the sheet opens */
@@ -919,6 +924,105 @@ input[type='number']:focus {
   font-family: var(--font-mono);
   font-size: 0.72rem;
   color: var(--text-muted);
+}
+
+/* Values that triggered a criterion (e.g. last post older than the inactive threshold) */
+.criteria-highlight {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+/* Preview button: primary trigger on touch screens; keyboard-only fallback elsewhere */
+.preview-btn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.preview-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+@media (hover: hover) {
+  .preview-btn:not(:focus-visible) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/* Account preview sheet (native <dialog>): centred card on wide screens, bottom sheet on phones */
+.preview-sheet {
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(80dvh, 640px);
+  margin: auto; /* the global reset zeroes margins, which breaks native dialog centring */
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.preview-sheet::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+#preview-sheet-content {
+  padding: 14px 16px 16px;
+}
+
+.preview-sheet-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--border-radius);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.preview-sheet-close:hover {
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+}
+
+/* Leave room for the close button next to the name row */
+.preview-sheet .hover-card-header {
+  padding-right: 32px;
+}
+
+@media (max-width: 860px) {
+  .preview-sheet {
+    width: 100%;
+    max-width: none;
+    margin: auto 0 0;
+    border-radius: 12px 12px 0 0;
+    border-bottom: 0;
+  }
+
+  .preview-sheet #preview-sheet-content {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 /* Crisp criteria badges */

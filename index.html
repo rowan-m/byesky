@@ -535,8 +535,17 @@
       </div>
     </div>
 
+    <!-- Backdrop behind the expanded Criteria & Scoring sheet on narrow screens -->
+    <div id="config-backdrop" class="config-backdrop" hidden></div>
+
     <!-- Singleton Rich Hover Preview Card -->
     <div id="profile-hover-card" class="hover-card card hidden" role="tooltip"></div>
+
+    <!-- Account preview sheet for touch screens and keyboard users (no hover) -->
+    <dialog id="preview-sheet" class="preview-sheet" aria-label="Account preview">
+      <button type="button" class="preview-sheet-close" aria-label="Close preview">✕</button>
+      <div id="preview-sheet-content"></div>
+    </dialog>
 
     <script src="/src/main.js" type="module"></script>
   </body>

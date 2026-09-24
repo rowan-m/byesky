@@ -1,11 +1,4 @@
-import { Agent } from '@atproto/api';
-import {
-  initOAuthClient,
-  startBackgroundSync,
-  batchUnfollow,
-  followUser,
-  fetchAccountPreview,
-} from './atproto.js';
+import { initOAuthClient } from './auth.js';
 import { syncCache } from './cache.js';
 import {
   isUserNoisy,
@@ -128,6 +121,33 @@ const hoverCard = document.getElementById('profile-hover-card');
 let hoverShowTimeout = null;
 let hoverHideTimeout = null;
 let activeHoverDid = null;
+
+// @atproto/api is ~80% of the bundle and only needed once signed in, so it's loaded on demand.
+let atprotoApi = null;
+async function loadAtprotoApi() {
+  atprotoApi ??= await import('./atproto.js');
+  return atprotoApi;
+}
+
+// Hint (not a credential) that a session probably exists, so the API chunk can be
+// fetched in parallel with OAuth session restore instead of after it.
+const SESSION_HINT_KEY = 'byesky:hasSession';
+function setSessionHint(hasSession) {
+  try {
+    if (hasSession) localStorage.setItem(SESSION_HINT_KEY, '1');
+    else localStorage.removeItem(SESSION_HINT_KEY);
+  } catch {
+    // Storage unavailable; we just lose the preload optimisation.
+  }
+}
+function isLikelySignedIn() {
+  const isOAuthCallback = /[?#&](code|state)=/.test(window.location.search + window.location.hash);
+  try {
+    return isOAuthCallback || localStorage.getItem(SESSION_HINT_KEY) === '1';
+  } catch {
+    return isOAuthCallback;
+  }
+}
 
 // --- Initialization ---
 window.addEventListener('DOMContentLoaded', async () => {
@@ -371,6 +391,18 @@ function setupEventListeners() {
     },
     { passive: true },
   );
+
+  // Preview sheet (touch / keyboard): close via button or a tap on the ::backdrop,
+  // which targets the <dialog> element itself rather than its content.
+  const previewSheet = document.getElementById('preview-sheet');
+  if (previewSheet) {
+    previewSheet
+      .querySelector('.preview-sheet-close')
+      ?.addEventListener('click', () => previewSheet.close());
+    previewSheet.addEventListener('click', (e) => {
+      if (e.target === previewSheet) previewSheet.close();
+    });
+  }
 }
 
 // --- Criteria & Scoring Panel ---
@@ -466,9 +498,12 @@ function storeConfigCollapsed(collapsed) {
   }
 }
 
-function setConfigCollapsed(collapsed) {
+// Page regions made inert while the narrow-screen sheet is open (modal behaviour).
+const CONFIG_OVERLAY_INERT_SELECTORS = ['.app-header', '.dashboard-main', '.app-footer'];
+
+function setConfigOverlay(overlay) {
   const panel = document.getElementById('config-panel');
-  const overlay = narrowLayoutQuery.matches && !collapsed;
+  const backdrop = document.getElementById('config-backdrop');
   if (overlay && panel) {
     // Pin the expanded sheet exactly where the bar currently sits so it can be sized
     // against the visible viewport (a sticky element's offset varies with scroll).
@@ -480,6 +515,27 @@ function setConfigCollapsed(collapsed) {
     root.setProperty('--config-bar-h', `${Math.round(rect.height)}px`);
   }
   document.documentElement.classList.toggle('is-config-overlay', overlay);
+  if (backdrop) backdrop.hidden = !overlay;
+
+  if (panel) {
+    if (overlay) {
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      panel.setAttribute('aria-label', 'Criteria & Scoring');
+    } else {
+      panel.removeAttribute('role');
+      panel.removeAttribute('aria-modal');
+      panel.removeAttribute('aria-label');
+    }
+  }
+  CONFIG_OVERLAY_INERT_SELECTORS.forEach((selector) => {
+    document.querySelector(selector)?.toggleAttribute('inert', overlay);
+  });
+}
+
+function setConfigCollapsed(collapsed) {
+  // Measure before toggling classes so the sheet is anchored to the collapsed bar.
+  setConfigOverlay(narrowLayoutQuery.matches && !collapsed);
   document.querySelector('.dashboard-grid')?.classList.toggle('is-config-collapsed', collapsed);
   document.getElementById('config-toggle')?.setAttribute('aria-expanded', String(!collapsed));
 }
@@ -494,6 +550,13 @@ function setupConfigPanel() {
   const grid = document.querySelector('.dashboard-grid');
   if (!toggle || !grid) return;
 
+  const isOverlayOpen = () =>
+    narrowLayoutQuery.matches && !grid.classList.contains('is-config-collapsed');
+  const closeOverlay = () => {
+    setConfigCollapsed(true);
+    toggle.focus();
+  };
+
   toggle.addEventListener('click', () => {
     const collapsed = !grid.classList.contains('is-config-collapsed');
     setConfigCollapsed(collapsed);
@@ -502,28 +565,12 @@ function setupConfigPanel() {
 
   // Escape closes the expanded overlay-style panel on narrow screens.
   document.addEventListener('keydown', (e) => {
-    if (
-      e.key === 'Escape' &&
-      narrowLayoutQuery.matches &&
-      !grid.classList.contains('is-config-collapsed')
-    ) {
-      setConfigCollapsed(true);
-      toggle.focus();
-    }
+    if (e.key === 'Escape' && isOverlayOpen()) closeOverlay();
   });
 
-  // Tapping the backdrop outside the expanded sheet closes it on narrow screens.
-  document.addEventListener('click', (e) => {
-    if (
-      narrowLayoutQuery.matches &&
-      !grid.classList.contains('is-config-collapsed') &&
-      e.target instanceof window.Node &&
-      e.target.isConnected &&
-      !document.getElementById('config-panel')?.contains(e.target)
-    ) {
-      setConfigCollapsed(true);
-    }
-  });
+  // The backdrop is a real element so taps outside the sheet are absorbed rather than
+  // activating whatever is underneath (rows, lock toggles, the batch Unfollow button).
+  document.getElementById('config-backdrop')?.addEventListener('click', closeOverlay);
 
   narrowLayoutQuery.addEventListener('change', applyConfigLayout);
 
@@ -533,11 +580,12 @@ function setupConfigPanel() {
   window.addEventListener('resize', () => {
     if (window.innerWidth === lastWidth) return;
     lastWidth = window.innerWidth;
-    if (narrowLayoutQuery.matches && !grid.classList.contains('is-config-collapsed')) {
+    if (isOverlayOpen()) {
       const body = document.getElementById('config-body');
       const scrollTop = body?.scrollTop ?? 0;
-      setConfigCollapsed(true);
-      setConfigCollapsed(false);
+      grid.classList.add('is-config-collapsed');
+      setConfigOverlay(true);
+      grid.classList.remove('is-config-collapsed');
       if (body) body.scrollTop = scrollTop;
     }
   });
@@ -619,15 +667,18 @@ function initializeStateFromDOM() {
 // --- Session & Authentication ---
 async function checkSession() {
   try {
+    if (isLikelySignedIn()) loadAtprotoApi().catch(() => {}); // warm up in parallel
     const oauthClient = initOAuthClient();
     const result = await oauthClient.init();
 
     if (result && result.session) {
+      const api = await loadAtprotoApi();
+      setSessionHint(true);
       state.session = result.session;
-      state.agent = new Agent(result.session);
+      state.agent = api.createAgent(result.session);
 
       // Fetch profile via public AppView to completely bypass PDS CORS/proxy blocks on login
-      const publicAgent = new Agent({ service: 'https://api.bsky.app' });
+      const publicAgent = api.createAgent({ service: 'https://api.bsky.app' });
       const profile = await publicAgent.api.app.bsky.actor.getProfile({
         actor: result.session.did,
       });
@@ -640,6 +691,7 @@ async function checkSession() {
       showUserSession(state.user.handle);
       await checkSyncStatus();
     } else {
+      setSessionHint(false);
       state.user = null;
       showAuthSection();
     }
@@ -678,6 +730,7 @@ async function handleLogout() {
     await syncCache.clear(state.user.did);
   }
 
+  setSessionHint(false);
   state.user = null;
   state.session = null;
   state.agent = null;
@@ -707,7 +760,7 @@ async function checkSyncStatus() {
     } else if (cachedState.status === 'fetching' || cachedState.status === 'enriching') {
       showSyncSection(cachedState);
       // Restart background sync in browser and attach update callback
-      startBackgroundSync(state.agent, state.user.did, onSyncUpdate);
+      atprotoApi.startBackgroundSync(state.agent, state.user.did, onSyncUpdate);
     } else if (cachedState.status === 'completed') {
       syncSection.classList.add('hidden');
       await loadFollowings();
@@ -745,7 +798,7 @@ async function triggerSync() {
     // Instantly check status & start background execution
     const cachedState = await syncCache.get(state.user.did);
     showSyncSection(cachedState);
-    startBackgroundSync(state.agent, state.user.did, onSyncUpdate);
+    atprotoApi.startBackgroundSync(state.agent, state.user.did, onSyncUpdate);
   } catch (err) {
     console.error('Trigger sync error:', err);
   }
@@ -1061,6 +1114,7 @@ function renderDashboard(resetSelection = true) {
                 <span class="handle">${handleHTML}</span>
               </div>
             </a>
+            <button type="button" class="preview-btn" aria-label="Preview @${safeHandle}" aria-haspopup="dialog">ⓘ</button>
           </div>
         </td>
         <td class="col-meta col-followers ${isLowFollowers ? 'criteria-highlight' : ''}" data-label="Followers" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${item.criteria.followersCount.toLocaleString()}</td>
@@ -1117,6 +1171,10 @@ function renderDashboard(resetSelection = true) {
       }
 
       const profileCell = row.querySelector('.profile-cell');
+      row.querySelector('.preview-btn')?.addEventListener('click', () => {
+        hideHoverCardImmediately();
+        showPreviewSheet(item);
+      });
       if (profileCell && hoverCard) {
         profileCell.addEventListener('mouseenter', () => {
           clearTimeout(hoverHideTimeout);
@@ -1249,7 +1307,12 @@ async function executeUnfollow(dids, buttonEl) {
   }
 
   try {
-    const data = await batchUnfollow(state.agent, state.user.did, unlockedDids, onSyncUpdate);
+    const data = await atprotoApi.batchUnfollow(
+      state.agent,
+      state.user.did,
+      unlockedDids,
+      onSyncUpdate,
+    );
 
     // Mark successfully unfollowed DIDs as unfollowed in raw state list
     const successes = data.success || [];
@@ -1280,7 +1343,7 @@ async function handleRefollow(did, handle, buttonEl) {
   buttonEl.textContent = 'Re-following...';
 
   try {
-    const data = await followUser(state.agent, state.user.did, did, onSyncUpdate);
+    const data = await atprotoApi.followUser(state.agent, state.user.did, did, onSyncUpdate);
 
     // Update in-memory following object's URI
     const f = state.followings.find((item) => item.did === did);
@@ -1611,36 +1674,72 @@ function renderHoverCardHTML(item, isHydrating = false) {
   `;
 }
 
+function needsPreviewHydration(rawItem) {
+  return (
+    rawItem.description === undefined &&
+    (!rawItem.preview ||
+      (!rawItem.preview.lastPost &&
+        (!rawItem.preview.mutuals || rawItem.preview.mutuals.length === 0)))
+  );
+}
+
+/** Lazily fetches bio, mutuals and latest post for an account, mutating it in place. */
+async function hydratePreview(rawItem) {
+  if (!atprotoApi || !state.agent || !state.user) return false;
+  const enriched = await atprotoApi.fetchAccountPreview(state.agent, state.user.did, rawItem.did);
+  rawItem.description = enriched.description;
+  rawItem.preview = enriched.preview;
+  if (enriched.mutualsCount !== undefined && rawItem.criteria) {
+    rawItem.criteria.mutualsCount = enriched.mutualsCount;
+    rawItem.criteria.hasMoreMutuals = enriched.hasMoreMutuals;
+  }
+  return true;
+}
+
 async function showHoverCard(item, anchorEl) {
   if (!hoverCard) return;
   activeHoverDid = item.did;
 
   const rawItem = state.followings.find((f) => f.did === item.did) || item;
-  const needsHydration =
-    rawItem.description === undefined &&
-    (!rawItem.preview ||
-      (!rawItem.preview.lastPost &&
-        (!rawItem.preview.mutuals || rawItem.preview.mutuals.length === 0)));
+  const needsHydration = needsPreviewHydration(rawItem);
 
   hoverCard.innerHTML = renderHoverCardHTML(rawItem, needsHydration);
   hoverCard.classList.remove('hidden');
   positionHoverCard(anchorEl);
 
-  if (needsHydration && state.agent && state.user) {
+  if (needsHydration) {
     try {
-      const enriched = await fetchAccountPreview(state.agent, state.user.did, rawItem.did);
-      rawItem.description = enriched.description;
-      rawItem.preview = enriched.preview;
-      if (enriched.mutualsCount !== undefined && rawItem.criteria) {
-        rawItem.criteria.mutualsCount = enriched.mutualsCount;
-        rawItem.criteria.hasMoreMutuals = enriched.hasMoreMutuals;
-      }
-      if (activeHoverDid === rawItem.did && !hoverCard.classList.contains('hidden')) {
+      const hydrated = await hydratePreview(rawItem);
+      if (hydrated && activeHoverDid === rawItem.did && !hoverCard.classList.contains('hidden')) {
         hoverCard.innerHTML = renderHoverCardHTML(rawItem, false);
         positionHoverCard(anchorEl);
       }
     } catch (err) {
       console.warn('Could not lazily hydrate hover preview:', err);
+    }
+  }
+}
+
+/** Touch devices have no hover, so the same preview opens as a modal bottom sheet. */
+async function showPreviewSheet(item) {
+  const sheet = document.getElementById('preview-sheet');
+  const content = document.getElementById('preview-sheet-content');
+  if (!sheet || !content) return;
+
+  const rawItem = state.followings.find((f) => f.did === item.did) || item;
+  const needsHydration = needsPreviewHydration(rawItem);
+  sheet.dataset.did = rawItem.did;
+  content.innerHTML = renderHoverCardHTML(rawItem, needsHydration);
+  if (!sheet.open) sheet.showModal();
+
+  if (needsHydration) {
+    try {
+      const hydrated = await hydratePreview(rawItem);
+      if (hydrated && sheet.open && sheet.dataset.did === rawItem.did) {
+        content.innerHTML = renderHoverCardHTML(rawItem, false);
+      }
+    } catch (err) {
+      console.warn('Could not lazily hydrate preview sheet:', err);
     }
   }
 }

@@ -1,4 +1,3 @@
-import { BrowserOAuthClient, atprotoLoopbackClientMetadata } from '@atproto/oauth-client-browser';
 import { Agent } from '@atproto/api';
 import { syncCache } from './cache.js';
 import { isSevereLabel, atUriToBskyUrl } from './scoring.js';
@@ -6,48 +5,12 @@ import { isSevereLabel, atUriToBskyUrl } from './scoring.js';
 // Simple sleep helper
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const OAUTH_SCOPE = 'atproto transition:generic transition:chat.bsky repo:app.bsky.graph.follow';
-
-export let oauthClient = null;
-
 /**
- * Initializes and returns the `@atproto/oauth-client-browser` instance dynamically
- * using the current window's origin (supporting both development loopback and production hosting).
+ * Creates an ATProto Agent from an OAuth session or `{ service }` options.
+ * Exposed so callers can use Agent without statically importing @atproto/api.
  */
-export function initOAuthClient() {
-  if (oauthClient) return oauthClient;
-
-  const origin = window.location.origin;
-  const redirectUri = origin + '/';
-
-  // For localhost / local loopback, use the special Client ID format with query parameters
-  const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1');
-
-  if (isLocal) {
-    const clientId = `http://localhost?redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(OAUTH_SCOPE)}`;
-    oauthClient = new BrowserOAuthClient({
-      handleResolver: 'https://bsky.social',
-      clientMetadata: atprotoLoopbackClientMetadata(clientId),
-    });
-  } else {
-    oauthClient = new BrowserOAuthClient({
-      handleResolver: 'https://bsky.social',
-      clientMetadata: {
-        client_id: `${origin}/client-metadata.json`,
-        client_name: 'ByeSky',
-        client_uri: origin,
-        redirect_uris: [redirectUri],
-        scope: OAUTH_SCOPE,
-        grant_types: ['authorization_code', 'refresh_token'],
-        response_types: ['code'],
-        token_endpoint_auth_method: 'none',
-        application_type: 'web',
-        dpop_bound_access_tokens: true,
-      },
-    });
-  }
-
-  return oauthClient;
+export function createAgent(sessionOrOptions) {
+  return new Agent(sessionOrOptions);
 }
 
 /**

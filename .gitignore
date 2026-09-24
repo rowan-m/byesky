@@ -25,3 +25,7 @@ Thumbs.db
 
 # Firebase local folder
 .firebase/
+
+# Playwright
+test-results/
+playwright-report/
