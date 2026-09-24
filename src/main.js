@@ -467,6 +467,19 @@ function storeConfigCollapsed(collapsed) {
 }
 
 function setConfigCollapsed(collapsed) {
+  const panel = document.getElementById('config-panel');
+  const overlay = narrowLayoutQuery.matches && !collapsed;
+  if (overlay && panel) {
+    // Pin the expanded sheet exactly where the bar currently sits so it can be sized
+    // against the visible viewport (a sticky element's offset varies with scroll).
+    const rect = panel.getBoundingClientRect();
+    const root = document.documentElement.style;
+    root.setProperty('--config-panel-top', `${Math.max(0, Math.round(rect.top))}px`);
+    root.setProperty('--config-panel-left', `${Math.round(rect.left)}px`);
+    root.setProperty('--config-panel-w', `${Math.round(rect.width)}px`);
+    root.setProperty('--config-bar-h', `${Math.round(rect.height)}px`);
+  }
+  document.documentElement.classList.toggle('is-config-overlay', overlay);
   document.querySelector('.dashboard-grid')?.classList.toggle('is-config-collapsed', collapsed);
   document.getElementById('config-toggle')?.setAttribute('aria-expanded', String(!collapsed));
 }
@@ -499,7 +512,35 @@ function setupConfigPanel() {
     }
   });
 
+  // Tapping the backdrop outside the expanded sheet closes it on narrow screens.
+  document.addEventListener('click', (e) => {
+    if (
+      narrowLayoutQuery.matches &&
+      !grid.classList.contains('is-config-collapsed') &&
+      e.target instanceof window.Node &&
+      e.target.isConnected &&
+      !document.getElementById('config-panel')?.contains(e.target)
+    ) {
+      setConfigCollapsed(true);
+    }
+  });
+
   narrowLayoutQuery.addEventListener('change', applyConfigLayout);
+
+  // Re-anchor the open sheet when the width changes (e.g. rotation). Height-only
+  // resizes (mobile browser chrome showing/hiding) are handled by dvh.
+  let lastWidth = window.innerWidth;
+  window.addEventListener('resize', () => {
+    if (window.innerWidth === lastWidth) return;
+    lastWidth = window.innerWidth;
+    if (narrowLayoutQuery.matches && !grid.classList.contains('is-config-collapsed')) {
+      const body = document.getElementById('config-body');
+      const scrollTop = body?.scrollTop ?? 0;
+      setConfigCollapsed(true);
+      setConfigCollapsed(false);
+      if (body) body.scrollTop = scrollTop;
+    }
+  });
   applyConfigLayout();
   updateConfigSummary();
 

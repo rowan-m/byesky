@@ -433,6 +433,8 @@ input[type='number']:focus {
 }
 
 .sidebar-body {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 10px 14px 14px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -655,6 +657,34 @@ input[type='number']:focus {
 
   .is-config-collapsed .sidebar-toggle {
     border-bottom: 0;
+  }
+
+  /*
+   * Expanded: a fixed sheet pinned where the bar was, so its height is bounded by the
+   * visible viewport and every control can be scrolled into view.
+   */
+  .dashboard-grid:not(.is-config-collapsed) .sidebar {
+    position: fixed;
+    top: var(--config-panel-top, 0px);
+    left: var(--config-panel-left, 8px);
+    width: var(--config-panel-w, calc(100% - 16px));
+    z-index: 300;
+    max-height: calc(100vh - var(--config-panel-top, 0px) - 8px);
+    max-height: calc(100dvh - var(--config-panel-top, 0px) - 8px);
+    box-shadow:
+      var(--shadow-md),
+      0 0 0 100vmax rgba(0, 0, 0, 0.35);
+  }
+
+  /* Hold the bar's space in the flow so the table doesn't jump when the sheet opens */
+  .dashboard-grid:not(.is-config-collapsed)::before {
+    content: '';
+    height: var(--config-bar-h, 41px);
+  }
+
+  .is-config-overlay,
+  .is-config-overlay body {
+    overflow: hidden;
   }
 
   .sidebar-toggle-chevron::before {
