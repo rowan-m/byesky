@@ -193,12 +193,10 @@ export function evaluateCriteria(item, params = {}, now = Date.now()) {
 
   let inactive = null;
   if (activityKnown) {
-    const postMs =
-      item._lastPostMs !== undefined
-        ? item._lastPostMs
-        : c.lastPostDate
-          ? Date.parse(c.lastPostDate) || 0
-          : 0;
+    let postMs = item._lastPostMs;
+    if (postMs === undefined) {
+      postMs = c.lastPostDate ? Date.parse(c.lastPostDate) || 0 : 0;
+    }
     inactive = postMs > 0 ? (now - postMs) / DAY_MS > p.inactiveDays : false;
   }
 

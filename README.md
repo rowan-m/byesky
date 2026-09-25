@@ -8,7 +8,7 @@ ByeSky is a minimal client-side web application designed to help Bluesky / Atmos
 
 ### 1. Prerequisites
 
-Make sure you have [Node.js](https://nodejs.org/) (v18+) and `npm` installed.
+Make sure you have [Node.js](https://nodejs.org/) (v22.12+) and `npm` installed.
 
 ### 2. Installation
 
@@ -56,6 +56,16 @@ Preview the compiled production build locally:
 ```bash
 npm run preview
 ```
+
+---
+
+## Data & Privacy
+
+ByeSky runs entirely in your browser and talks directly to your Bluesky Personal Data Server (PDS) and the public Bluesky AppView over OAuth:
+
+- **Least-privilege OAuth scopes**: ByeSky requests read access to your profile, follows, blocks, mutes, notifications, likes, and chat metadata, plus create/delete permission on `app.bsky.graph.follow` records only.
+- **Local browser cache**: Synced profile and activity summaries are cached locally in your browser's `IndexedDB` (`ByeSkyCache`) so you can filter, score, and revisit your list without re-fetching everything.
+- **Signing out**: Clicking **Logout** revokes the active OAuth session and clears the cached sync data for your account on this device (while keeping your locked-account list so protected accounts stay protected next time you sign in).
 
 ---
 

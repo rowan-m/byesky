@@ -30,8 +30,9 @@ export function setupActionListeners() {
       state.pendingUnfollowDids = dids;
       const pageDids = new Set(getCurrentPageItems().map((item) => item.did));
       const offPageCount = dids.filter((did) => !pageDids.has(did)).length;
+      const offPagePlural = offPageCount === 1 ? '' : 's';
       const offPageNote =
-        offPageCount > 0 ? ` (${offPageCount} on other page${offPageCount === 1 ? '' : 's'})` : '';
+        offPageCount > 0 ? ` (${offPageCount} on other page${offPagePlural})` : '';
       modalTitle.textContent = 'Batch Unfollow Confirmation';
       modalDesc.textContent = `Are you sure you want to unfollow ${dids.length} selected accounts${offPageNote}?`;
       if (!confirmModal.open) confirmModal.showModal();
