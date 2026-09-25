@@ -330,6 +330,41 @@ input[type='number']:focus {
   border: 1px solid var(--danger);
 }
 
+/* Login screen: what the OAuth prompt will ask for */
+.permissions-note {
+  margin-top: 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background-color: var(--bg-app);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.permissions-note h3 {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.permissions-note ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.permissions-note li + li {
+  margin-top: 4px;
+}
+
+.permissions-note strong {
+  color: var(--text-primary);
+}
+
+.permissions-note p {
+  margin: 0;
+}
+
 /* Missing-permission prompt (sessions granted before a scope was added) */
 .reauth-banner {
   display: flex;

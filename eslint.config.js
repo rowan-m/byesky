@@ -20,6 +20,7 @@ export default [
         sessionStorage: 'readonly',
         indexedDB: 'readonly',
         Event: 'readonly',
+        URL: 'readonly',
         URLSearchParams: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',

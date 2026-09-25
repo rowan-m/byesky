@@ -6,6 +6,26 @@ import { createSyncLimiters, isRetryableError, withRetry } from './ratelimit.js'
 // Shared by every sync and preview request so they all respect the same per-host budget.
 const limiters = createSyncLimiters();
 
+const PUBLIC_APPVIEW = 'https://api.bsky.app';
+
+/**
+ * Agent for AppView reads that need the signed-in user's context (viewer state such as
+ * mutes, blocks and follows; known followers; notifications). Requests go to the user's PDS,
+ * which authenticates them and proxies to the Bluesky AppView. OAuth tokens are bound to the
+ * PDS, so they can't be sent to the AppView directly.
+ */
+export function createViewerAgent(agent) {
+  return agent.withProxy('bsky_appview', 'did:web:api.bsky.app');
+}
+
+/**
+ * Unauthenticated AppView agent for public data (author feeds, profiles). It has its own
+ * rate-limit budget, separate from the user's PDS, so bulk public reads go here.
+ */
+function createPublicAgent() {
+  return new Agent({ service: PUBLIC_APPVIEW });
+}
+
 /**
  * Creates an ATProto Agent from an OAuth session or `{ service }` options.
  * Exposed so callers can use Agent without statically importing @atproto/api.
@@ -13,6 +33,13 @@ const limiters = createSyncLimiters();
 export function createAgent(sessionOrOptions) {
   return new Agent(sessionOrOptions);
 }
+
+/**
+ * How many of your most recent notifications, posts and likes each interaction scan reads.
+ * Each page is 100 items, so this is 25 requests per scan.
+ */
+// Keep the badge tooltips in main.js in step if this changes.
+export const SCAN_LIMIT = 2500;
 
 /**
  * The phases of a sync, in order. The UI shows "Step n of N" from these so the user can
@@ -91,17 +118,10 @@ async function fetchWithBackoff(userDid, apiCallFn, onUpdate, limiter) {
  * Uses the native Agent in the browser.
  */
 async function runSync(agent, userDid, onUpdate) {
-  // Use the session-authenticated home-PDS agent for queries requiring viewer relationship contexts
-  const pdsAgent = agent;
-
-  // Create a dedicated session-authenticated AppView agent pointing directly to api.bsky.app.
-  // This completely bypasses buggy proxying and 500/CORS blocks on private PDS hosts
-  // when executing batch getProfiles, getAuthorFeed, or getKnownFollowers queries,
-  // while satisfying Authentication Required checks.
-  const appViewAgent = new Agent({
-    service: 'https://api.bsky.app',
-    session: agent.sessionManager,
-  });
+  // Viewer-context AppView reads go through the user's PDS; bulk public reads (author feeds)
+  // go straight to the public AppView. See createViewerAgent / createPublicAgent.
+  const viewerAgent = createViewerAgent(agent);
+  const publicAgent = createPublicAgent();
 
   const syncSessionId = Math.random().toString(36).substring(2, 10);
 
@@ -141,7 +161,7 @@ async function runSync(agent, userDid, onUpdate) {
       const response = await fetchWithBackoff(
         userDid,
         () =>
-          pdsAgent.api.app.bsky.graph.getFollows({
+          viewerAgent.api.app.bsky.graph.getFollows({
             actor: userDid,
             cursor,
             limit: 100,
@@ -255,7 +275,7 @@ async function runSync(agent, userDid, onUpdate) {
   await syncCache.updateProgress(
     userDid,
     0,
-    1000,
+    SCAN_LIMIT,
     'Fetching interaction history (notifications & DMs)...',
     { step: syncStep('notifications') },
   );
@@ -264,13 +284,13 @@ async function runSync(agent, userDid, onUpdate) {
   try {
     let cursor = undefined;
     let fetchedCount = 0;
-    const maxNotificationsToScan = 1000;
+    const maxNotificationsToScan = SCAN_LIMIT;
 
     do {
       const response = await fetchWithBackoff(
         userDid,
         () =>
-          agent.api.app.bsky.notification.listNotifications({
+          viewerAgent.api.app.bsky.notification.listNotifications({
             limit: 100,
             cursor,
           }),
@@ -315,14 +335,11 @@ async function runSync(agent, userDid, onUpdate) {
   }
 
   try {
-    if (agent.api.chat && agent.api.chat.bsky && agent.api.chat.bsky.convo) {
+    const chatAgent = agent.withProxy('bsky_chat', 'did:web:api.bsky.chat');
+    if (chatAgent.chat?.bsky?.convo) {
       const convos = await fetchWithBackoff(
         userDid,
-        () =>
-          agent.api.chat.bsky.convo.listConvos(
-            { limit: 50 },
-            { headers: { 'atproto-proxy': 'did:web:api.bsky.chat#bsky_chat' } },
-          ),
+        () => chatAgent.chat.bsky.convo.listConvos({ limit: 50 }),
         onUpdate,
         limiters.pds,
       );
@@ -357,23 +374,23 @@ async function runSync(agent, userDid, onUpdate) {
   await syncCache.updateProgress(
     userDid,
     0,
-    1000,
+    SCAN_LIMIT,
     'Mapping your outbound feed interactions (replies & reposts)...',
     { step: syncStep('ownPosts') },
   );
   if (onUpdate) onUpdate();
 
-  // 1. Scan your own author feed (up to 1,000 items)
+  // 1. Scan your own author feed (up to SCAN_LIMIT items)
   try {
     let feedCursor = undefined;
     let feedFetched = 0;
-    const maxFeedToScan = 1000;
+    const maxFeedToScan = SCAN_LIMIT;
 
     do {
       const response = await fetchWithBackoff(
         userDid,
         () =>
-          appViewAgent.api.app.bsky.feed.getAuthorFeed({
+          publicAgent.api.app.bsky.feed.getAuthorFeed({
             actor: userDid,
             limit: 100,
             cursor: feedCursor,
@@ -430,13 +447,13 @@ async function runSync(agent, userDid, onUpdate) {
     console.warn('Could not fetch outbound feed for interactions:', err);
   }
 
-  // 2. Scan your own liked records (up to 1,000 items)
+  // 2. Scan your own liked records (up to SCAN_LIMIT items)
   try {
     let likesCursor = undefined;
     let likesFetched = 0;
-    const maxLikesToScan = 1000;
+    const maxLikesToScan = SCAN_LIMIT;
 
-    await syncCache.updateProgress(userDid, 0, 1000, 'Mapping your outbound liked posts...', {
+    await syncCache.updateProgress(userDid, 0, SCAN_LIMIT, 'Mapping your outbound liked posts...', {
       step: syncStep('likes'),
     });
     if (onUpdate) onUpdate();
@@ -560,9 +577,9 @@ async function runSync(agent, userDid, onUpdate) {
     try {
       const profilesRes = await fetchWithBackoff(
         userDid,
-        () => appViewAgent.api.app.bsky.actor.getProfiles({ actors: batchDids }),
+        () => viewerAgent.api.app.bsky.actor.getProfiles({ actors: batchDids }),
         onUpdate,
-        limiters.appview,
+        limiters.pds,
       );
       if (profilesRes.data && profilesRes.data.profiles) {
         const profilesMap = new Map(profilesRes.data.profiles.map((p) => [p.did, p]));
@@ -631,16 +648,26 @@ async function runSync(agent, userDid, onUpdate) {
       // the profile's postsCount: it excludes reposts, so repost-only accounts would be
       // wrongly treated as never having posted.
       try {
-        const feedRes = await fetchWithBackoff(
+        let feedRes = await fetchWithBackoff(
           userDid,
           () =>
-            appViewAgent.api.app.bsky.feed.getAuthorFeed({
+            publicAgent.api.app.bsky.feed.getAuthorFeed({
               actor: f.did,
               limit: 100,
             }),
           onUpdate,
           limiters.appview,
         );
+        // Accounts that hide their posts from logged-out visitors return an empty feed
+        // publicly, so ask again as the signed-in user before concluding they never posted.
+        if ((feedRes.data.feed || []).length === 0 && f.criteria.postsCount > 0) {
+          feedRes = await fetchWithBackoff(
+            userDid,
+            () => viewerAgent.api.app.bsky.feed.getAuthorFeed({ actor: f.did, limit: 100 }),
+            onUpdate,
+            limiters.pds,
+          );
+        }
 
         const activity = summariseAuthorActivity(feedRes.data.feed || []);
         f.criteria.lastPostDate = activity.lastPostDate;
@@ -678,7 +705,7 @@ async function runSync(agent, userDid, onUpdate) {
           const mutualsRes = await fetchWithBackoff(
             userDid,
             () =>
-              pdsAgent.api.app.bsky.graph.getKnownFollowers({
+              viewerAgent.api.app.bsky.graph.getKnownFollowers({
                 actor: f.did,
                 limit: 11,
               }),
@@ -759,8 +786,9 @@ export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
   const cached = await syncCache.get(userDid);
   const followingsMap = new Map(cached.followings.map((f) => [f.did, f]));
 
-  // Create a dedicated PDS agent for write operations to bypass read-only AppView limitations
-  const pdsAgent = new Agent(agent.sessionManager);
+  // Writes go to the user's own PDS; lookups of the viewer's follow record go via the AppView.
+  const pdsAgent = agent;
+  const viewerAgent = createViewerAgent(agent);
 
   const results = {
     success: [],
@@ -779,10 +807,13 @@ export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
     try {
       let followingUri = f.followingUri;
       if (!followingUri) {
-        const profile = await withRetry(() => agent.api.app.bsky.actor.getProfile({ actor: did }), {
-          limiter: limiters.pds,
-          maxAttempts: 4,
-        });
+        const profile = await withRetry(
+          () => viewerAgent.api.app.bsky.actor.getProfile({ actor: did }),
+          {
+            limiter: limiters.pds,
+            maxAttempts: 4,
+          },
+        );
         followingUri = profile.data.viewer?.following || null;
       }
 
@@ -871,8 +902,7 @@ export async function followUser(agent, userDid, targetDid, onUpdate) {
     throw new Error('User not found in cache');
   }
 
-  // Create a dedicated PDS agent for write operations to bypass read-only AppView limitations
-  const pdsAgent = new Agent(agent.sessionManager);
+  const pdsAgent = agent; // writes go to the user's own PDS
 
   const response = await withRetry(() => pdsAgent.follow(targetDid), {
     limiter: limiters.pds,
@@ -891,25 +921,26 @@ export async function followUser(agent, userDid, targetDid, onUpdate) {
  * if hovering an account from an older cache before a full resync.
  */
 export async function fetchAccountPreview(agent, userDid, targetDid) {
-  const appViewAgent = new Agent({
-    service: 'https://api.bsky.app',
-    session: agent.sessionManager,
-  });
+  const publicAgent = createPublicAgent();
+  const viewerAgent = createViewerAgent(agent);
 
   const opts = { maxAttempts: 2 };
   const [profileRes, feedRes, mutualsRes] = await Promise.allSettled([
-    withRetry(() => appViewAgent.api.app.bsky.actor.getProfile({ actor: targetDid }), {
+    withRetry(() => publicAgent.api.app.bsky.actor.getProfile({ actor: targetDid }), {
       ...opts,
       limiter: limiters.appview,
     }),
-    withRetry(() => appViewAgent.api.app.bsky.feed.getAuthorFeed({ actor: targetDid, limit: 1 }), {
+    withRetry(() => publicAgent.api.app.bsky.feed.getAuthorFeed({ actor: targetDid, limit: 1 }), {
       ...opts,
       limiter: limiters.appview,
     }),
-    withRetry(() => agent.api.app.bsky.graph.getKnownFollowers({ actor: targetDid, limit: 11 }), {
-      ...opts,
-      limiter: limiters.pds,
-    }),
+    withRetry(
+      () => viewerAgent.api.app.bsky.graph.getKnownFollowers({ actor: targetDid, limit: 11 }),
+      {
+        ...opts,
+        limiter: limiters.pds,
+      },
+    ),
   ]);
 
   const description =

@@ -79,12 +79,14 @@ export function initOAuthClient() {
 `;
 
 const fakeAtprotoModule = `
+const app = { bsky: { actor: {
+  getProfile: async () => ({ data: { handle: 'e2e-user.bsky.social' } }),
+} } };
 export function createAgent() {
-  return {
-    api: { app: { bsky: { actor: {
-      getProfile: async () => ({ data: { handle: 'e2e-user.bsky.social' } }),
-    } } } },
-  };
+  return { app, api: { app } };
+}
+export function createViewerAgent() {
+  return { app, api: { app } };
 }
 export function startBackgroundSync() {}
 export async function batchUnfollow() { return {}; }

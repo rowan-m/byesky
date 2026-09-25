@@ -29,7 +29,7 @@
       <!-- Shown when the signed-in session is missing permissions added since it was granted -->
       <div id="reauth-banner" class="reauth-banner hidden" role="alert">
         <div class="reauth-banner-text">
-          <strong>ByeSky needs an extra permission.</strong>
+          <strong id="reauth-banner-title">ByeSky needs an extra permission.</strong>
           <span id="reauth-banner-detail"></span>
         </div>
         <button type="button" id="reauth-btn" class="btn btn-primary btn-sm">Sign in again</button>
@@ -66,6 +66,29 @@
           <div id="login-error" class="error-msg hidden"></div>
           <button type="submit" id="login-btn" class="btn btn-primary">Connect with Bluesky</button>
         </form>
+
+        <div class="permissions-note" id="permissions-note">
+          <h3>What ByeSky asks permission for</h3>
+          <ul>
+            <li>
+              <strong>Read</strong> who you follow, your notifications, and public profiles and
+              posts, to score each account.
+            </li>
+            <li>
+              <strong>Follow and unfollow</strong> accounts, only when you confirm it. ByeSky can't
+              post, like, block or change your profile.
+            </li>
+            <li>
+              <strong>List your DM conversations</strong>, to see who you talk to. ByeSky never
+              sends messages.
+            </li>
+          </ul>
+          <p>
+            Bluesky's sign-in screen uses broader labels for these, such as
+            <em>"Access specific parts of your Bluesky account"</em> and
+            <em>"Chat: Read and send messages"</em>. Everything ByeSky finds stays in this browser.
+          </p>
+        </div>
       </section>
 
       <!-- Section 2: Sync and Analysis Progress -->

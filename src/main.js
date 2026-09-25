@@ -1,5 +1,5 @@
 import { initOAuthClient } from './auth.js';
-import { getMissingScopes } from './scopes.js';
+import { describeScopes, getMissingScopes, hasLegacyBroadScopes } from './scopes.js';
 import { syncCache } from './cache.js';
 import {
   isUserNoisy,
@@ -75,6 +75,7 @@ let state = {
   },
   pendingUnfollowDids: [], // Holds DIDs during confirmation modal
   missingScopes: [], // Required OAuth scopes this session wasn't granted (see scopes.js)
+  hasLegacyScopes: false, // Session still holds broad scopes from before granular permissions
 };
 
 // DOM Elements
@@ -161,6 +162,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Conforms with RFC 8252 loopback IP policies (which prohibit "localhost" hostnames)
   if (window.location.hostname === 'localhost') {
     window.location.replace(window.location.href.replace('localhost', '127.0.0.1'));
+    return;
+  }
+  // OAuth client metadata is published for the *.web.app hostname, so sign-in only works
+  // there. Send visitors on the equivalent *.firebaseapp.com hostname across.
+  if (window.location.hostname.endsWith('.firebaseapp.com')) {
+    const url = new URL(window.location.href);
+    url.hostname = url.hostname.replace(/\.firebaseapp\.com$/, '.web.app');
+    window.location.replace(url.href);
     return;
   }
 
@@ -698,15 +707,10 @@ async function checkSession() {
       state.session = result.session;
       state.agent = api.createAgent(result.session);
 
-      // Fetch profile via public AppView to completely bypass PDS CORS/proxy blocks on login
-      const publicAgent = api.createAgent({ service: 'https://api.bsky.app' });
-      const profile = await publicAgent.api.app.bsky.actor.getProfile({
-        actor: result.session.did,
-      });
       state.user = {
         loggedIn: true,
         did: result.session.did,
-        handle: profile.data.handle,
+        handle: await resolveOwnHandle(api, result.session.did),
       };
 
       showUserSession(state.user.handle);
@@ -729,6 +733,27 @@ async function checkSession() {
   }
 }
 
+/**
+ * Looks up the signed-in user's handle for display. A valid session must not be treated as
+ * signed out just because the lookup failed (e.g. while Bluesky is rate limiting), so fall
+ * back to the authenticated route and finally to the DID.
+ */
+async function resolveOwnHandle(api, did) {
+  try {
+    const publicAgent = api.createAgent({ service: 'https://api.bsky.app' });
+    return (await publicAgent.app.bsky.actor.getProfile({ actor: did })).data.handle;
+  } catch (err) {
+    console.warn('Public profile lookup failed, trying via the PDS:', err);
+  }
+  try {
+    const viewer = api.createViewerAgent(state.agent);
+    return (await viewer.app.bsky.actor.getProfile({ actor: did })).data.handle;
+  } catch (err) {
+    console.warn('Could not look up own handle; showing DID instead:', err);
+    return did;
+  }
+}
+
 // --- Granted-scope check ---
 // Sessions authorised before the app added a scope keep their original grant until the
 // user signs in again, so check what was granted and prompt if anything is missing.
@@ -736,13 +761,16 @@ const RESYNC_AFTER_REAUTH_KEY = 'byesky:resyncAfterReauth';
 
 async function checkGrantedScopes(session) {
   let missing = [];
+  let legacy = false;
   try {
     const { scope } = await session.getTokenInfo(false);
     missing = getMissingScopes(scope);
+    legacy = hasLegacyBroadScopes(scope);
   } catch (err) {
     console.warn('Could not read granted OAuth scopes:', err);
   }
   state.missingScopes = missing;
+  state.hasLegacyScopes = legacy;
   renderReauthBanner();
   return missing;
 }
@@ -756,10 +784,17 @@ function renderReauthBanner(errorMessage = '') {
   banner.classList.toggle('hidden', missing.length === 0);
   if (missing.length === 0) return;
 
-  const purposes = missing.map(({ purpose }) => purpose).join(' and ');
-  detail.textContent =
-    errorMessage ||
-    `Sign in again to allow it to ${purposes}. Syncing still works, but results will be incomplete until you do.`;
+  const purposes = describeScopes(missing).join(' and ');
+  const title = document.getElementById('reauth-banner-title');
+  if (title) {
+    title.textContent = state.hasLegacyScopes
+      ? 'ByeSky has narrowed its permissions.'
+      : 'ByeSky needs an extra permission.';
+  }
+  const message = state.hasLegacyScopes
+    ? 'It now asks only for what it needs instead of broad access to your account. Sign in again to switch; until then some results may be incomplete.'
+    : `Sign in again to allow it to ${purposes}. Syncing still works, but results will be incomplete until you do.`;
+  detail.textContent = errorMessage || message;
 }
 
 function consumeResyncAfterReauth() {
@@ -1023,20 +1058,20 @@ function renderDashboard(resetSelection = true) {
 
       if (!hasInbound) {
         badgesHTML +=
-          '<span class="badge badge-secondary" title="They have not liked, replied, or messaged you recently (scanned last 1,000 notifications)">NO INBOUND</span>';
+          '<span class="badge badge-secondary" title="They have not liked, replied, or messaged you recently (scanned your last 2,500 notifications)">NO INBOUND</span>';
         warningsCount++;
       } else {
         badgesHTML +=
-          '<span class="badge badge-success" title="They liked, replied, or messaged you recently (scanned last 1,000 notifications)">THEY CONTACTED</span>';
+          '<span class="badge badge-success" title="They liked, replied, or messaged you recently (scanned your last 2,500 notifications)">THEY CONTACTED</span>';
       }
 
       if (!hasOutbound) {
         badgesHTML +=
-          '<span class="badge badge-secondary" title="You have not liked, replied, or reposted them recently (scanned last 1,000 activities)">NO OUTBOUND</span>';
+          '<span class="badge badge-secondary" title="You have not liked, replied, or reposted them recently (scanned your last 2,500 posts and likes)">NO OUTBOUND</span>';
         warningsCount++;
       } else {
         badgesHTML +=
-          '<span class="badge badge-success" title="You liked, replied, or reposted them recently (scanned last 1,000 activities)">I CONTACTED</span>';
+          '<span class="badge badge-success" title="You liked, replied, or reposted them recently (scanned your last 2,500 posts and likes)">I CONTACTED</span>';
       }
 
       if (isUserNoisy(item, state.params.noisyPostsThreshold)) {
