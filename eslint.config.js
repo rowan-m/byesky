@@ -26,6 +26,9 @@ export default [
         console: 'readonly',
         fetch: 'readonly',
         alert: 'readonly',
+        AbortController: 'readonly',
+        DOMException: 'readonly',
+        Headers: 'readonly',
         // Node globals
         process: 'readonly',
         global: 'readonly',

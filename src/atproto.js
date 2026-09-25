@@ -1,9 +1,10 @@
 import { Agent } from '@atproto/api';
 import { syncCache } from './cache.js';
 import { isSevereLabel, atUriToBskyUrl, summariseAuthorActivity } from './scoring.js';
+import { createSyncLimiters, isRetryableError, withRetry } from './ratelimit.js';
 
-// Simple sleep helper
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Shared by every sync and preview request so they all respect the same per-host budget.
+const limiters = createSyncLimiters();
 
 /**
  * Creates an ATProto Agent from an OAuth session or `{ service }` options.
@@ -36,47 +37,34 @@ export function startBackgroundSync(agent, userDid, onUpdate) {
 }
 
 /**
- * Robust wrapper that executes ATProto calls and intercepts HTTP 429 (Rate Limit) exceptions,
- * performing exponential backoff and updating the UI state.
+ * Runs an API call through the shared limiter for its host, retrying rate-limit, transient
+ * server and network errors with backoff. Retry pauses are surfaced in the sync progress so
+ * the user knows why things slowed down.
  */
-async function fetchWithBackoff(userDid, apiCallFn, onUpdate) {
-  let backoffMs = 3000; // Start with 3 seconds
-  const maxBackoff = 45000; // Max 45 seconds
+async function fetchWithBackoff(userDid, apiCallFn, onUpdate, limiter) {
+  // Check for user-driven cancellation before making the request
+  const cached = await syncCache.get(userDid);
+  if (cached.status === 'cancelled') {
+    throw new Error('Sync cancelled');
+  }
 
-  while (true) {
-    // Check for user-driven cancellation before making the request
-    const cached = await syncCache.get(userDid);
-    if (cached.status === 'cancelled') {
-      throw new Error('Sync cancelled');
-    }
-
-    try {
-      return await apiCallFn();
-    } catch (err) {
-      if (err.status === 429) {
-        console.warn(
-          `Rate limit hit (429) for ${userDid}. Pausing for ${backoffMs}ms before retry...`,
-        );
-
-        // Push visual warnings to the UI
-        const seconds = Math.round(backoffMs / 1000);
-        await syncCache.updateProgress(
+  return withRetry(apiCallFn, {
+    limiter,
+    onWait: ({ ms, reason }) => {
+      if (reason === 'error') return;
+      const seconds = Math.max(1, Math.round(ms / 1000));
+      console.warn(`Bluesky is rate limiting requests (${reason}). Pausing ${seconds}s.`);
+      syncCache
+        .updateProgress(
           userDid,
           undefined,
           undefined,
-          `Rate limit hit! Pausing for ${seconds}s to avoid blocks...`,
-        );
-        if (onUpdate) onUpdate();
-
-        await sleep(backoffMs);
-
-        // Increment backoff exponentially
-        backoffMs = Math.min(maxBackoff, backoffMs * 1.5);
-        continue; // Retry the request
-      }
-      throw err; // Re-throw other HTTP or XRPC errors
-    }
-  }
+          `Bluesky asked us to slow down. Pausing for ${seconds}s so your other Bluesky apps keep working...`,
+        )
+        .then(() => onUpdate && onUpdate())
+        .catch(() => {});
+    },
+  });
 }
 
 /**
@@ -137,6 +125,7 @@ async function runSync(agent, userDid, onUpdate) {
             limit: 100,
           }),
         onUpdate,
+        limiters.pds,
       );
 
       const check = await syncCache.get(userDid);
@@ -263,6 +252,7 @@ async function runSync(agent, userDid, onUpdate) {
             cursor,
           }),
         onUpdate,
+        limiters.pds,
       );
 
       const notifsList = response.data.notifications || [];
@@ -306,6 +296,7 @@ async function runSync(agent, userDid, onUpdate) {
             { headers: { 'atproto-proxy': 'did:web:api.bsky.chat#bsky_chat' } },
           ),
         onUpdate,
+        limiters.pds,
       );
       if (convos.data && convos.data.convos) {
         for (const convo of convos.data.convos) {
@@ -359,6 +350,7 @@ async function runSync(agent, userDid, onUpdate) {
             cursor: feedCursor,
           }),
         onUpdate,
+        limiters.appview,
       );
 
       const feedList = response.data.feed || [];
@@ -429,6 +421,7 @@ async function runSync(agent, userDid, onUpdate) {
             cursor: likesCursor,
           }),
         onUpdate,
+        limiters.pds,
       );
 
       const records = response.data.records || [];
@@ -530,6 +523,7 @@ async function runSync(agent, userDid, onUpdate) {
         userDid,
         () => appViewAgent.api.app.bsky.actor.getProfiles({ actors: batchDids }),
         onUpdate,
+        limiters.appview,
       );
       if (profilesRes.data && profilesRes.data.profiles) {
         const profilesMap = new Map(profilesRes.data.profiles.map((p) => [p.did, p]));
@@ -574,8 +568,9 @@ async function runSync(agent, userDid, onUpdate) {
   );
   if (onUpdate) onUpdate();
 
-  // Throttled concurrency = 12 (optimized for fast parallel fetching)
-  const concurrencyLimit = 12;
+  // Pacing comes from the shared per-host limiters; a few workers keep the pipe full
+  // while individual requests are in flight.
+  const concurrencyLimit = 6;
   let activeIndex = 0;
 
   async function worker() {
@@ -590,9 +585,6 @@ async function runSync(agent, userDid, onUpdate) {
       const f = followingsList[idx];
       if (!f || f.criteria.isDeleted) continue;
 
-      // Spacing delay between consecutive calls = 300ms per worker
-      await sleep(300);
-
       // 1. Latest activity and 7-day frequency (Never Posted / Inactive / Noisy Poster).
       // Posts, replies and reposts all count, so fetch the unfiltered feed. Don't gate on
       // the profile's postsCount: it excludes reposts, so repost-only accounts would be
@@ -606,6 +598,7 @@ async function runSync(agent, userDid, onUpdate) {
               limit: 100,
             }),
           onUpdate,
+          limiters.appview,
         );
 
         const activity = summariseAuthorActivity(feedRes.data.feed || []);
@@ -645,6 +638,7 @@ async function runSync(agent, userDid, onUpdate) {
               limit: 11,
             }),
           onUpdate,
+          limiters.pds,
         );
         const mutuals = mutualsRes.data.followers || [];
         f.criteria.mutualsCount = mutuals.length;
@@ -738,7 +732,10 @@ export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
     try {
       let followingUri = f.followingUri;
       if (!followingUri) {
-        const profile = await agent.api.app.bsky.actor.getProfile({ actor: did });
+        const profile = await withRetry(() => agent.api.app.bsky.actor.getProfile({ actor: did }), {
+          limiter: limiters.pds,
+          maxAttempts: 4,
+        });
         followingUri = profile.data.viewer?.following || null;
       }
 
@@ -764,14 +761,18 @@ export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
   for (let i = 0; i < pendingDeletes.length; i += chunkSize) {
     const chunk = pendingDeletes.slice(i, i + chunkSize);
     try {
-      await pdsAgent.com.atproto.repo.applyWrites({
-        repo: userDid,
-        writes: chunk.map((item) => ({
-          $type: 'com.atproto.repo.applyWrites#delete',
-          collection: 'app.bsky.graph.follow',
-          rkey: item.rkey,
-        })),
-      });
+      await withRetry(
+        () =>
+          pdsAgent.com.atproto.repo.applyWrites({
+            repo: userDid,
+            writes: chunk.map((item) => ({
+              $type: 'com.atproto.repo.applyWrites#delete',
+              collection: 'app.bsky.graph.follow',
+              rkey: item.rkey,
+            })),
+          }),
+        { limiter: limiters.pds, maxAttempts: 4 },
+      );
 
       for (const item of chunk) {
         item.f.followingUri = null;
@@ -779,13 +780,23 @@ export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
         results.success.push(item.did);
       }
     } catch (batchErr) {
-      console.warn(
-        'Batch applyWrites failed, falling back to individual deleteFollow calls:',
-        batchErr,
-      );
+      if (isRetryableError(batchErr)) {
+        // Rate limited or the server is struggling even after retries: sending up to 100
+        // individual deletes would only make that worse, so report the chunk as failed.
+        for (const item of chunk) {
+          results.failed.push({ did: item.did, error: batchErr.message || 'Request failed' });
+        }
+        continue;
+      }
+      // A per-record problem (e.g. a follow that was already deleted elsewhere) fails the
+      // whole batch, so retry the chunk one record at a time to isolate it.
+      console.warn('Batch applyWrites failed, retrying records individually:', batchErr);
       for (const item of chunk) {
         try {
-          await pdsAgent.deleteFollow(item.followingUri);
+          await withRetry(() => pdsAgent.deleteFollow(item.followingUri), {
+            limiter: limiters.pds,
+            maxAttempts: 3,
+          });
           item.f.followingUri = null;
           item.f.criteria.isBlocked = false;
           results.success.push(item.did);
@@ -816,7 +827,10 @@ export async function followUser(agent, userDid, targetDid, onUpdate) {
   // Create a dedicated PDS agent for write operations to bypass read-only AppView limitations
   const pdsAgent = new Agent(agent.sessionManager);
 
-  const response = await pdsAgent.follow(targetDid);
+  const response = await withRetry(() => pdsAgent.follow(targetDid), {
+    limiter: limiters.pds,
+    maxAttempts: 3,
+  });
   f.followingUri = response.uri;
 
   await syncCache.set(userDid, { followings: cached.followings });
@@ -835,15 +849,19 @@ export async function fetchAccountPreview(agent, userDid, targetDid) {
     session: agent.sessionManager,
   });
 
+  const opts = { maxAttempts: 2 };
   const [profileRes, feedRes, mutualsRes] = await Promise.allSettled([
-    appViewAgent.api.app.bsky.actor.getProfile({ actor: targetDid }),
-    appViewAgent.api.app.bsky.feed.getAuthorFeed({
-      actor: targetDid,
-      limit: 1,
+    withRetry(() => appViewAgent.api.app.bsky.actor.getProfile({ actor: targetDid }), {
+      ...opts,
+      limiter: limiters.appview,
     }),
-    agent.api.app.bsky.graph.getKnownFollowers({
-      actor: targetDid,
-      limit: 11,
+    withRetry(() => appViewAgent.api.app.bsky.feed.getAuthorFeed({ actor: targetDid, limit: 1 }), {
+      ...opts,
+      limiter: limiters.appview,
+    }),
+    withRetry(() => agent.api.app.bsky.graph.getKnownFollowers({ actor: targetDid, limit: 11 }), {
+      ...opts,
+      limiter: limiters.pds,
     }),
   ]);
 
