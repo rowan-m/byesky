@@ -7,8 +7,13 @@ import {
   modalDesc,
   modalTitle,
 } from './dom.js';
-import { atprotoApi, state } from './state.js';
-import { getCurrentPageItems, renderDashboard, updateSelectedCounter } from './table.js';
+import { atprotoApi, getFollowing, state } from './state.js';
+import {
+  getCurrentPageItems,
+  invalidateTableCache,
+  renderDashboard,
+  updateSelectedCounter,
+} from './table.js';
 
 function closeConfirmModal() {
   if (confirmModal?.open) confirmModal.close();
@@ -108,13 +113,14 @@ async function handleUndoUnfollow(dids, triggerBtn) {
   for (const did of dids) {
     try {
       const data = await atprotoApi.followUser(state.agent, state.user.did, did);
-      const f = state.followings.find((item) => item.did === did);
+      const f = getFollowing(did);
       if (f) f.followingUri = data.followingUri;
       restored++;
     } catch (err) {
       failed.push({ did, error: err.message });
     }
   }
+  invalidateTableCache();
   renderDashboard(false);
   if (failed.length === 0) {
     showActionToast({
@@ -157,13 +163,14 @@ export async function executeUnfollow(dids, buttonEl) {
     const failures = data.failed || [];
 
     successes.forEach((did) => {
-      const f = state.followings.find((item) => item.did === did);
+      const f = getFollowing(did);
       if (f) {
         f.followingUri = null;
       }
       state.selectedDids.delete(did);
     });
 
+    invalidateTableCache();
     renderDashboard(false);
 
     if (failures.length === 0 && successes.length > 0) {
@@ -236,11 +243,12 @@ export async function handleRefollow(did, handle, buttonEl) {
   try {
     const data = await atprotoApi.followUser(state.agent, state.user.did, did);
 
-    const f = state.followings.find((item) => item.did === did);
+    const f = getFollowing(did);
     if (f) {
       f.followingUri = data.followingUri;
     }
 
+    invalidateTableCache();
     renderDashboard(false);
     showActionToast({
       message: `Re-followed @${handle || did}.`,

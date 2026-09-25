@@ -21,7 +21,7 @@ import {
 } from './dom.js';
 import { formatLastSynced } from './format.js';
 import { hideLoading } from './session.js';
-import { atprotoApi, state } from './state.js';
+import { atprotoApi, setFollowings, state } from './state.js';
 import { renderDashboard } from './table.js';
 
 // Tracks progress within the current step to estimate the time remaining.
@@ -118,7 +118,7 @@ export async function loadFollowings() {
 
   try {
     const cachedState = await syncCache.get(state.user.did);
-    state.followings = cachedState.followings || [];
+    setFollowings(cachedState.followings || []);
     state.lockedDids = new Set(await syncCache.getLockedDids(state.user.did));
 
     // Hide progress, loader, and auth connection card, show dashboard

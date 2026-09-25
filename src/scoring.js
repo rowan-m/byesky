@@ -193,9 +193,13 @@ export function evaluateCriteria(item, params = {}, now = Date.now()) {
 
   let inactive = null;
   if (activityKnown) {
-    inactive = c.lastPostDate
-      ? (now - new Date(c.lastPostDate).getTime()) / DAY_MS > p.inactiveDays
-      : false;
+    const postMs =
+      item._lastPostMs !== undefined
+        ? item._lastPostMs
+        : c.lastPostDate
+          ? Date.parse(c.lastPostDate) || 0
+          : 0;
+    inactive = postMs > 0 ? (now - postMs) / DAY_MS > p.inactiveDays : false;
   }
 
   let noisy = null;
@@ -290,6 +294,19 @@ export function calculateScore(item, weights, params, now = Date.now()) {
   return scoreEvaluation(evaluateCriteria(item, params, now), weights);
 }
 
+/**
+ * Precomputes parsed timestamps and lowercase search text on an item when followings are
+ * loaded, avoiding repeated Date.parse() and toLowerCase() work during filtering/sorting.
+ */
+export function prepareFollowing(item) {
+  const c = item.criteria || {};
+  const interactionDate = c.lastInteraction?.date || c.lastLikeDate;
+  item._lastPostMs = c.lastPostDate ? Date.parse(c.lastPostDate) || 0 : 0;
+  item._lastInteractionMs = interactionDate ? Date.parse(interactionDate) || 0 : 0;
+  item._searchText = `${(item.handle || '').toLowerCase()}\n${(item.displayName || '').toLowerCase()}`;
+  return item;
+}
+
 export function filterAndSortFollowings(
   followings,
   { searchQuery, weights, filters, params, sorting, lockedDids },
@@ -303,57 +320,65 @@ export function filterAndSortFollowings(
   }
   const showLocked = filters.locked ?? true;
   const activeFilters = { ...filters, neverPosted: filters.neverPosted ?? true };
+  const queryLower = searchQuery ? searchQuery.toLowerCase() : '';
 
-  return followings
-    .map((item) => {
-      const evaluation = evaluateCriteria(item, params, now);
-      const score = scoreEvaluation(evaluation, weights);
-      const isOk = isEvaluationOk(evaluation, weights);
-      return {
-        ...item,
-        score,
-        evaluation,
-        isOk,
-        neverPosted: evaluation.matches.neverPosted === true,
-        dynamicInactive: evaluation.matches.inactive === true,
-        isLocked: lockedSet.has(item.did),
-      };
-    })
-    .filter((item) => {
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        const nMatch = item.displayName && item.displayName.toLowerCase().includes(q);
-        const hMatch = item.handle && item.handle.toLowerCase().includes(q);
-        if (!nMatch && !hMatch) return false;
-      }
+  const filtered = [];
+  for (const item of followings) {
+    if (queryLower) {
+      const haystack =
+        item._searchText ??
+        `${(item.handle || '').toLowerCase()}\n${(item.displayName || '').toLowerCase()}`;
+      if (!haystack.includes(queryLower)) continue;
+    }
 
-      if (item.isLocked) return showLocked;
+    const isLocked = lockedSet.has(item.did);
+    if (isLocked && !showLocked) continue;
 
-      // Shown if it's OK and OK is ticked, or if it matches at least one ticked criterion.
-      // Unknown (null) criteria never match.
-      if (item.isOk && activeFilters.ok) return true;
-      return CRITERIA_IDS.some((id) => activeFilters[id] && item.evaluation.matches[id] === true);
-    })
-    .sort((a, b) => {
-      let valA, valB;
-      if (sorting.col === 'followers') {
-        valA = a.criteria.followersCount;
-        valB = b.criteria.followersCount;
-      } else if (sorting.col === 'lastPost') {
-        valA = a.criteria.lastPostDate ? new Date(a.criteria.lastPostDate).getTime() : 0;
-        valB = b.criteria.lastPostDate ? new Date(b.criteria.lastPostDate).getTime() : 0;
-      } else if (sorting.col === 'lastInteraction') {
-        const dateA = a.criteria.lastInteraction?.date || a.criteria.lastLikeDate;
-        const dateB = b.criteria.lastInteraction?.date || b.criteria.lastLikeDate;
-        valA = dateA ? new Date(dateA).getTime() : 0;
-        valB = dateB ? new Date(dateB).getTime() : 0;
-      } else if (sorting.col === 'score') {
-        valA = a.score;
-        valB = b.score;
-      }
+    const evaluation = evaluateCriteria(item, params, now);
+    const isOk = isEvaluationOk(evaluation, weights);
 
-      if (valA < valB) return sorting.order === 'asc' ? -1 : 1;
-      if (valA > valB) return sorting.order === 'asc' ? 1 : -1;
-      return 0;
+    // Shown if it's locked (and showLocked is true), or if it's OK and OK is ticked,
+    // or if it matches at least one ticked criterion. Unknown (null) criteria never match.
+    const matchesFilter =
+      isLocked ||
+      (isOk && activeFilters.ok) ||
+      CRITERIA_IDS.some((id) => activeFilters[id] && evaluation.matches[id] === true);
+    if (!matchesFilter) continue;
+
+    const score = scoreEvaluation(evaluation, weights);
+    filtered.push({
+      ...item,
+      score,
+      evaluation,
+      isOk,
+      neverPosted: evaluation.matches.neverPosted === true,
+      dynamicInactive: evaluation.matches.inactive === true,
+      isLocked,
     });
+  }
+
+  return filtered.sort((a, b) => {
+    let valA, valB;
+    if (sorting.col === 'followers') {
+      valA = a.criteria.followersCount ?? 0;
+      valB = b.criteria.followersCount ?? 0;
+    } else if (sorting.col === 'lastPost') {
+      valA =
+        a._lastPostMs ?? (a.criteria.lastPostDate ? Date.parse(a.criteria.lastPostDate) || 0 : 0);
+      valB =
+        b._lastPostMs ?? (b.criteria.lastPostDate ? Date.parse(b.criteria.lastPostDate) || 0 : 0);
+    } else if (sorting.col === 'lastInteraction') {
+      const dateA = a.criteria.lastInteraction?.date || a.criteria.lastLikeDate;
+      const dateB = b.criteria.lastInteraction?.date || b.criteria.lastLikeDate;
+      valA = a._lastInteractionMs ?? (dateA ? Date.parse(dateA) || 0 : 0);
+      valB = b._lastInteractionMs ?? (dateB ? Date.parse(dateB) || 0 : 0);
+    } else if (sorting.col === 'score') {
+      valA = a.score;
+      valB = b.score;
+    }
+
+    if (valA < valB) return sorting.order === 'asc' ? -1 : 1;
+    if (valA > valB) return sorting.order === 'asc' ? 1 : -1;
+    return 0;
+  });
 }

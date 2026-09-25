@@ -1,11 +1,13 @@
 import { escapeHTML, sanitizeUrl } from '../scoring.js';
-import { hoverCard } from './dom.js';
+import { hoverCard, tableBody } from './dom.js';
 import { formatCount, formatMutualsCount, formatRelativeDate } from './format.js';
-import { atprotoApi, state } from './state.js';
+import { atprotoApi, getFollowing, state } from './state.js';
+import { invalidateTableCache } from './table.js';
 
 let hoverShowTimeout = null;
 let hoverHideTimeout = null;
 let activeHoverDid = null;
+const inflightPreviews = new Map();
 
 export function setupPreviewListeners() {
   // Keep singleton hover card visible when hovered directly
@@ -25,6 +27,41 @@ export function setupPreviewListeners() {
     { passive: true },
   );
 
+  // Delegated row preview button & profile-cell hover listeners on the table body
+  if (tableBody) {
+    tableBody.addEventListener('click', (e) => {
+      const btn = e.target.closest('.preview-btn');
+      if (!btn) return;
+      const row = btn.closest('tr[data-did]');
+      const item = row ? getFollowing(row.dataset.did) : null;
+      if (!item) return;
+      hideHoverCardImmediately();
+      showPreviewSheet(item);
+    });
+
+    if (hoverCard) {
+      tableBody.addEventListener('mouseover', (e) => {
+        const profileCell = e.target.closest('.profile-cell');
+        if (!profileCell || profileCell.contains(e.relatedTarget)) return;
+        const row = profileCell.closest('tr[data-did]');
+        const item = row ? getFollowing(row.dataset.did) : null;
+        if (!item) return;
+        clearTimeout(hoverHideTimeout);
+        clearTimeout(hoverShowTimeout);
+        hoverShowTimeout = setTimeout(() => {
+          showHoverCard(item, profileCell);
+        }, 180);
+      });
+
+      tableBody.addEventListener('mouseout', (e) => {
+        const profileCell = e.target.closest('.profile-cell');
+        if (!profileCell || profileCell.contains(e.relatedTarget)) return;
+        clearTimeout(hoverShowTimeout);
+        scheduleHideHoverCard();
+      });
+    }
+  }
+
   // Preview sheet (touch / keyboard): close via button or a tap on the ::backdrop,
   // which targets the <dialog> element itself rather than its content.
   const previewSheet = document.getElementById('preview-sheet');
@@ -34,28 +71,6 @@ export function setupPreviewListeners() {
       ?.addEventListener('click', () => previewSheet.close());
     previewSheet.addEventListener('click', (e) => {
       if (e.target === previewSheet) previewSheet.close();
-    });
-  }
-}
-
-/** Wires a table row's preview button and profile cell hover to the previews. */
-export function attachRowPreview(row, item) {
-  const profileCell = row.querySelector('.profile-cell');
-  row.querySelector('.preview-btn')?.addEventListener('click', () => {
-    hideHoverCardImmediately();
-    showPreviewSheet(item);
-  });
-  if (profileCell && hoverCard) {
-    profileCell.addEventListener('mouseenter', () => {
-      clearTimeout(hoverHideTimeout);
-      clearTimeout(hoverShowTimeout);
-      hoverShowTimeout = setTimeout(() => {
-        showHoverCard(item, profileCell);
-      }, 180);
-    });
-    profileCell.addEventListener('mouseleave', () => {
-      clearTimeout(hoverShowTimeout);
-      scheduleHideHoverCard();
     });
   }
 }
@@ -260,6 +275,7 @@ function renderHoverCardHTML(item, isHydrating = false) {
 }
 
 function needsPreviewHydration(rawItem) {
+  if (rawItem._previewHydrated) return false;
   // Mutuals are unknown when the user skipped that part of the sync.
   if (rawItem.criteria && rawItem.criteria.mutualsCount === undefined) return true;
   return (
@@ -273,21 +289,39 @@ function needsPreviewHydration(rawItem) {
 /** Lazily fetches bio, mutuals and latest post for an account, mutating it in place. */
 async function hydratePreview(rawItem) {
   if (!atprotoApi || !state.agent || !state.user) return false;
-  const enriched = await atprotoApi.fetchAccountPreview(state.agent, state.user.did, rawItem.did);
-  rawItem.description = enriched.description;
-  rawItem.preview = enriched.preview;
-  if (enriched.mutualsCount !== undefined && rawItem.criteria) {
-    rawItem.criteria.mutualsCount = enriched.mutualsCount;
-    rawItem.criteria.hasMoreMutuals = enriched.hasMoreMutuals;
-  }
-  return true;
+  const existing = inflightPreviews.get(rawItem.did);
+  if (existing) return existing;
+
+  const task = (async () => {
+    try {
+      const enriched = await atprotoApi.fetchAccountPreview(
+        state.agent,
+        state.user.did,
+        rawItem.did,
+      );
+      rawItem.description = enriched.description ?? '';
+      rawItem.preview = enriched.preview;
+      rawItem._previewHydrated = true;
+      if (enriched.mutualsCount !== undefined && rawItem.criteria) {
+        rawItem.criteria.mutualsCount = enriched.mutualsCount;
+        rawItem.criteria.hasMoreMutuals = enriched.hasMoreMutuals;
+        invalidateTableCache();
+      }
+      return true;
+    } finally {
+      inflightPreviews.delete(rawItem.did);
+    }
+  })();
+
+  inflightPreviews.set(rawItem.did, task);
+  return task;
 }
 
 async function showHoverCard(item, anchorEl) {
   if (!hoverCard) return;
   activeHoverDid = item.did;
 
-  const rawItem = state.followings.find((f) => f.did === item.did) || item;
+  const rawItem = getFollowing(item.did) || item;
   const needsHydration = needsPreviewHydration(rawItem);
 
   hoverCard.innerHTML = renderHoverCardHTML(rawItem, needsHydration);
@@ -313,7 +347,7 @@ async function showPreviewSheet(item) {
   const content = document.getElementById('preview-sheet-content');
   if (!sheet || !content) return;
 
-  const rawItem = state.followings.find((f) => f.did === item.did) || item;
+  const rawItem = getFollowing(item.did) || item;
   const needsHydration = needsPreviewHydration(rawItem);
   sheet.dataset.did = rawItem.did;
   content.innerHTML = renderHoverCardHTML(rawItem, needsHydration);

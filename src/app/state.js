@@ -1,4 +1,5 @@
 import { defaultFilters, defaultWeights } from '../criteria.js';
+import { prepareFollowing } from '../scoring.js';
 
 // Application State
 export const state = {
@@ -12,6 +13,7 @@ export const state = {
     totalCount: 0,
   },
   followings: [], // Raw followings from backend
+  followingsByDid: new Map(), // O(1) lookup by DID
   selectedDids: new Set(), // DIDs marked for unfollowing
   lockedDids: new Set(), // DIDs protected from Select All and unfollowing
   pagination: {
@@ -35,6 +37,15 @@ export const state = {
   missingScopes: [], // Required OAuth scopes this session wasn't granted (see scopes.js)
   hasLegacyScopes: false, // Session still holds broad scopes from before granular permissions
 };
+
+export function setFollowings(list = []) {
+  state.followings = list.map(prepareFollowing);
+  state.followingsByDid = new Map(state.followings.map((item) => [item.did, item]));
+}
+
+export function getFollowing(did) {
+  return state.followingsByDid.get(did);
+}
 
 // @atproto/api is ~80% of the bundle and only needed once signed in, so it's loaded on demand.
 // Exported as a live binding: it stays null until loadAtprotoApi() has resolved.

@@ -13,7 +13,14 @@ import {
   userHandleSpan,
   userProfile,
 } from './dom.js';
-import { atprotoApi, isLikelySignedIn, loadAtprotoApi, setSessionHint, state } from './state.js';
+import {
+  atprotoApi,
+  isLikelySignedIn,
+  loadAtprotoApi,
+  setFollowings,
+  setSessionHint,
+  state,
+} from './state.js';
 import { checkSyncStatus, triggerSync } from './sync-ui.js';
 
 // Sessions authorised before the app added a scope keep their original grant until the
@@ -183,7 +190,7 @@ async function handleLogout() {
   state.agent = null;
   state.missingScopes = [];
   renderReauthBanner();
-  state.followings = [];
+  setFollowings([]);
   state.selectedDids.clear();
   state.lockedDids.clear();
   showAuthSection();

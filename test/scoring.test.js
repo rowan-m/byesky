@@ -16,6 +16,7 @@ import {
   evaluateCriteria,
   isEvaluationOk,
   clampParam,
+  prepareFollowing,
 } from '../src/scoring.js';
 
 const defaultWeights = {
@@ -417,5 +418,22 @@ test('Scoring & Sanitization Helpers', async (t) => {
     assert.strictEqual(clampParam('noisyPostsThreshold', '0'), 1);
     assert.strictEqual(clampParam('inactiveDays', 'abc'), 180);
     assert.strictEqual(clampParam('massFollowerThreshold', 50), 100);
+  });
+
+  await t.test('prepareFollowing precomputes timestamps and search text', () => {
+    const postDate = '2026-01-15T12:00:00.000Z';
+    const interactionDate = '2026-02-01T08:30:00.000Z';
+    const item = prepareFollowing({
+      did: 'did:plc:prep',
+      handle: 'Alice.BSKY.Social',
+      displayName: 'Alice Example',
+      criteria: {
+        lastPostDate: postDate,
+        lastInteraction: { date: interactionDate, type: 'like' },
+      },
+    });
+    assert.strictEqual(item._lastPostMs, Date.parse(postDate));
+    assert.strictEqual(item._lastInteractionMs, Date.parse(interactionDate));
+    assert.strictEqual(item._searchText, 'alice.bsky.social\nalice example');
   });
 });

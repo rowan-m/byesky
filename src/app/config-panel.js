@@ -50,17 +50,22 @@ export function setupConfigListeners() {
 
   setupConfigPanel();
 
-  // Parameters
+  // Parameters (debounced on input so multi-digit edits don't re-render on every keystroke)
   for (const [id, key] of Object.entries(PARAM_INPUTS)) {
     const input = document.getElementById(id);
     if (!input) continue;
+    let paramTimeout = null;
     input.addEventListener('input', () => {
+      clearTimeout(paramTimeout);
       // Leave an empty or half-typed field alone; clamp when it's a number.
       if (input.value.trim() === '') return;
-      state.params[key] = clampParam(key, input.value);
-      renderDashboard();
+      paramTimeout = setTimeout(() => {
+        state.params[key] = clampParam(key, input.value);
+        renderDashboard();
+      }, 150);
     });
     input.addEventListener('change', () => {
+      clearTimeout(paramTimeout);
       state.params[key] = clampParam(key, input.value);
       input.value = String(state.params[key]);
       renderDashboard();

@@ -21,7 +21,6 @@ import {
   tableSearch,
 } from './dom.js';
 import { formatCount, formatMutualsCount, formatRelativeDate } from './format.js';
-import { attachRowPreview } from './preview.js';
 import { state } from './state.js';
 
 const FOCUSABLE_ROW_SELECTORS = [
@@ -32,6 +31,30 @@ const FOCUSABLE_ROW_SELECTORS = [
   '.refollow-single-btn',
   '.profile-link',
 ];
+
+let tableCacheRev = 0;
+let cachedListKey = null;
+let cachedListFollowings = null;
+let cachedListResult = null;
+
+export function invalidateTableCache() {
+  tableCacheRev++;
+  cachedListKey = null;
+}
+
+function computeTableCacheKey() {
+  return JSON.stringify({
+    rev: tableCacheRev,
+    len: state.followings.length,
+    q: state.searchQuery,
+    col: state.sorting.col,
+    order: state.sorting.order,
+    weights: state.weights,
+    filters: state.filters,
+    params: state.params,
+    locked: Array.from(state.lockedDids),
+  });
+}
 
 function scrollToTop() {
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -52,6 +75,54 @@ export function setupTableListeners() {
 
   // Select All checkbox
   selectAllCheckbox.addEventListener('change', handleSelectAllToggle);
+
+  // Delegated row controls on tableBody (single listener instead of 400+ per render)
+  tableBody.addEventListener('click', async (e) => {
+    const refollowBtn = e.target.closest('.refollow-single-btn');
+    if (refollowBtn) {
+      await handleRefollow(refollowBtn.dataset.did, refollowBtn.dataset.handle, refollowBtn);
+      return;
+    }
+
+    const unfollowBtn = e.target.closest('.unfollow-single-btn');
+    if (unfollowBtn) {
+      const did = unfollowBtn.dataset.did;
+      if (!did || state.lockedDids.has(did)) return;
+      await executeUnfollow([did], unfollowBtn);
+      return;
+    }
+
+    const lockBtn = e.target.closest('.lock-toggle-btn');
+    if (lockBtn) {
+      const did = lockBtn.dataset.did;
+      if (!did) return;
+      if (state.lockedDids.has(did)) {
+        state.lockedDids.delete(did);
+      } else {
+        state.lockedDids.add(did);
+        state.selectedDids.delete(did);
+      }
+      if (state.user) {
+        await syncCache.setLockedDids(state.user.did, Array.from(state.lockedDids));
+      }
+      renderDashboard(false);
+    }
+  });
+
+  tableBody.addEventListener('change', (e) => {
+    const checkbox = e.target.closest('.row-checkbox');
+    if (!checkbox) return;
+    const did = checkbox.dataset.did;
+    if (!did || state.lockedDids.has(did)) return;
+    if (checkbox.checked) {
+      state.selectedDids.add(did);
+    } else {
+      state.selectedDids.delete(did);
+    }
+    checkbox.closest('tr')?.classList.toggle('selected-row', checkbox.checked);
+    updateSelectedCounter();
+    renderCheckboxHeaders(getCurrentPageItems());
+  });
 
   // Table header sorting (clicking the <button class="sort-btn"> bubbles to <th class="sortable">)
   document.querySelectorAll('.sortable').forEach((th) => {
@@ -91,7 +162,14 @@ export function setupTableListeners() {
 }
 
 export function getFilteredAndSortedList() {
-  return filterAndSortFollowings(state.followings, state);
+  const key = computeTableCacheKey();
+  if (cachedListResult && cachedListFollowings === state.followings && cachedListKey === key) {
+    return cachedListResult;
+  }
+  cachedListFollowings = state.followings;
+  cachedListKey = key;
+  cachedListResult = filterAndSortFollowings(state.followings, state);
+  return cachedListResult;
 }
 
 export function getCurrentPageItems(list = getFilteredAndSortedList()) {
@@ -271,9 +349,10 @@ export function renderDashboard(resetSelection = false) {
 
       let isInteractionInactive = true;
       const lastInteractionDate = item.criteria.lastInteraction?.date || item.criteria.lastLikeDate;
-      if (lastInteractionDate) {
-        const lastInteraction = new Date(lastInteractionDate).getTime();
-        const daysSinceInteraction = (Date.now() - lastInteraction) / (1000 * 60 * 60 * 24);
+      const lastInteractionMs =
+        item._lastInteractionMs ?? (lastInteractionDate ? Date.parse(lastInteractionDate) || 0 : 0);
+      if (lastInteractionMs > 0) {
+        const daysSinceInteraction = (Date.now() - lastInteractionMs) / (1000 * 60 * 60 * 24);
         isInteractionInactive = daysSinceInteraction > state.params.inactiveDays;
       }
 
@@ -366,49 +445,6 @@ export function renderDashboard(resetSelection = false) {
         </td>
       `;
 
-      if (isUnfollowed) {
-        row.querySelector('.refollow-single-btn').addEventListener('click', async (e) => {
-          const did = e.target.dataset.did;
-          const handle = e.target.dataset.handle;
-          await handleRefollow(did, handle, e.target);
-        });
-      } else {
-        const lockBtn = row.querySelector('.lock-toggle-btn');
-        if (lockBtn) {
-          lockBtn.addEventListener('click', async () => {
-            if (state.lockedDids.has(item.did)) {
-              state.lockedDids.delete(item.did);
-            } else {
-              state.lockedDids.add(item.did);
-              state.selectedDids.delete(item.did);
-            }
-            if (state.user) {
-              await syncCache.setLockedDids(state.user.did, Array.from(state.lockedDids));
-            }
-            renderDashboard(false);
-          });
-        }
-
-        row.querySelector('.row-checkbox').addEventListener('change', (e) => {
-          if (state.lockedDids.has(item.did)) return;
-          if (e.target.checked) {
-            state.selectedDids.add(item.did);
-          } else {
-            state.selectedDids.delete(item.did);
-          }
-          row.classList.toggle('selected-row', e.target.checked);
-          updateSelectedCounter();
-          renderCheckboxHeaders(pageItems);
-        });
-
-        row.querySelector('.unfollow-single-btn').addEventListener('click', async (e) => {
-          if (state.lockedDids.has(item.did)) return;
-          const did = e.target.dataset.did;
-          await executeUnfollow([did], e.target);
-        });
-      }
-
-      attachRowPreview(row, item);
       tableBody.appendChild(row);
     });
   }
