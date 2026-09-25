@@ -18,8 +18,8 @@ function migrate(entry) {
   return { ...entry, schemaVersion: CACHE_SCHEMA_VERSION };
 }
 
-class UserSyncCache {
-  constructor() {
+export class UserSyncCache {
+  constructor({ indexedDB: idb, localStorage: storage, persistIntervalMs } = {}) {
     this.store = new Map(); // In-memory fallback (used for Node environment and active browser sessions)
     this.dbName = 'ByeSkyCache';
     this.dbVersion = 1;
@@ -27,7 +27,12 @@ class UserSyncCache {
     this.dbPromise = null;
     this.pendingWrites = new Map(); // did -> timer id for a scheduled IndexedDB write
     this.lastWriteAt = new Map(); // did -> time of the last IndexedDB write
-    if (isBrowser) {
+    this.idb = idb ?? (isBrowser ? window.indexedDB : null);
+    this.storage =
+      storage ??
+      (isBrowser && typeof window.localStorage !== 'undefined' ? window.localStorage : null);
+    this.persistIntervalMs = persistIntervalMs ?? PERSIST_INTERVAL_MS;
+    if (isBrowser && !idb) {
       // Write anything still pending when the tab is hidden or closed.
       window.addEventListener('pagehide', () => this.flushAll());
       document.addEventListener('visibilitychange', () => {
@@ -38,7 +43,7 @@ class UserSyncCache {
 
   // Opens the IndexedDB connection once and shares it between callers.
   _getDB() {
-    if (!isBrowser) return Promise.resolve(null);
+    if (!this.idb) return Promise.resolve(null);
     if (!this.dbPromise) {
       this.dbPromise = this._openDB().catch((err) => {
         this.dbPromise = null; // allow a later retry
@@ -50,7 +55,7 @@ class UserSyncCache {
 
   _openDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.dbName, this.dbVersion);
+      const request = this.idb.open(this.dbName, this.dbVersion);
 
       request.onupgradeneeded = (e) => {
         const db = e.target.result;
@@ -75,7 +80,7 @@ class UserSyncCache {
     }
 
     // If not in browser (e.g. Node tests) or IndexedDB fails, use in-memory store
-    if (!isBrowser) {
+    if (!this.idb) {
       return this._getMemoryFallback(did);
     }
 
@@ -108,9 +113,9 @@ class UserSyncCache {
   }
 
   _loadLockedFromStorage(did) {
-    if (!isBrowser || typeof localStorage === 'undefined') return [];
+    if (!this.storage) return [];
     try {
-      const raw = localStorage.getItem(`byesky_locked_${did}`);
+      const raw = this.storage.getItem(`byesky_locked_${did}`);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) return parsed;
@@ -122,9 +127,9 @@ class UserSyncCache {
   }
 
   _saveLockedToStorage(did, lockedDids) {
-    if (!isBrowser || typeof localStorage === 'undefined') return;
+    if (!this.storage) return;
     try {
-      localStorage.setItem(`byesky_locked_${did}`, JSON.stringify(lockedDids));
+      this.storage.setItem(`byesky_locked_${did}`, JSON.stringify(lockedDids));
     } catch (err) {
       console.warn('Failed to save locked DIDs to localStorage:', err);
     }
@@ -184,9 +189,9 @@ class UserSyncCache {
    * are coalesced. The in-memory copy is always current; call flush() at milestones.
    */
   _schedulePersist(did) {
-    if (!isBrowser || this.pendingWrites.has(did)) return;
+    if (!this.idb || this.pendingWrites.has(did)) return;
     const since = Date.now() - (this.lastWriteAt.get(did) ?? 0);
-    const delay = Math.max(0, PERSIST_INTERVAL_MS - since);
+    const delay = Math.max(0, this.persistIntervalMs - since);
     const timer = setTimeout(() => {
       this.pendingWrites.delete(did);
       this._persist(did);
@@ -243,7 +248,7 @@ class UserSyncCache {
    * sync that another tab is running.
    */
   async reload(did) {
-    if (!isBrowser) return this.get(did);
+    if (!this.idb) return this.get(did);
     const db = await this._getDB();
     const data = await new Promise((resolve) => {
       const request = db
@@ -289,7 +294,7 @@ class UserSyncCache {
     this.pendingWrites.delete(did);
     this.store.delete(did);
     this._getMemoryFallback(did, existingLocked);
-    if (!isBrowser) return;
+    if (!this.idb) return;
 
     try {
       const db = await this._getDB();

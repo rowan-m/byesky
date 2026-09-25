@@ -22,8 +22,8 @@ export function createViewerAgent(agent) {
  * Unauthenticated AppView agent for public data (author feeds, profiles). It has its own
  * rate-limit budget, separate from the user's PDS, so bulk public reads go here.
  */
-function createPublicAgent() {
-  return new Agent({ service: PUBLIC_APPVIEW });
+function createPublicAgent(agent) {
+  return agent?._publicAgent || new Agent({ service: PUBLIC_APPVIEW });
 }
 
 /**
@@ -223,7 +223,7 @@ async function runSync(agent, userDid, onUpdate, signal) {
   // Viewer-context AppView reads go through the user's PDS; bulk public reads (author feeds)
   // go straight to the public AppView. See createViewerAgent / createPublicAgent.
   const viewerAgent = createViewerAgent(agent);
-  const publicAgent = createPublicAgent();
+  const publicAgent = createPublicAgent(agent);
 
   // Every write checks the signal first, so a replaced or cancelled run can't overwrite the
   // state of the run that replaced it.
@@ -1012,7 +1012,7 @@ export async function followUser(agent, userDid, targetDid, onUpdate) {
  * if hovering an account from an older cache before a full resync.
  */
 export async function fetchAccountPreview(agent, userDid, targetDid) {
-  const publicAgent = createPublicAgent();
+  const publicAgent = createPublicAgent(agent);
   const viewerAgent = createViewerAgent(agent);
 
   const opts = { maxAttempts: 2 };
