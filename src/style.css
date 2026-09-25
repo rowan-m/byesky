@@ -1186,6 +1186,13 @@ input[type='number']:focus {
   border-color: var(--border-color);
 }
 
+/* Data that couldn't be fetched: neutral, dashed so it doesn't read as a verdict */
+.badge-info {
+  background-color: var(--primary-light);
+  color: var(--primary);
+  border: 1px dashed var(--primary);
+}
+
 .badge-locked {
   background-color: var(--primary-light);
   color: var(--primary);

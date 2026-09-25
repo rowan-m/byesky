@@ -105,9 +105,12 @@ export async function fetchAccountPreview(agent, userDid, targetDid) {
 /** Serves fake auth/API modules so the dashboard renders with fixture data. */
 export async function mockSignedInApp(
   page,
-  { count = 40, grantedScope = OAUTH_SCOPE, syncState = null } = {},
+  { count = 40, grantedScope = OAUTH_SCOPE, syncState = null, patches = {} } = {},
 ) {
-  const followings = makeFollowings(count);
+  // patches: { [index]: { criteria: {...} } } merged into individual fixture accounts.
+  const followings = makeFollowings(count).map((f, i) =>
+    patches[i] ? { ...f, criteria: { ...f.criteria, ...patches[i].criteria } } : f,
+  );
   await page.route(
     (url) => url.pathname === '/src/auth.js',
     (route) =>

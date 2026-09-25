@@ -2,13 +2,16 @@ import { initOAuthClient } from './auth.js';
 import { describeScopes, getMissingScopes, hasLegacyBroadScopes } from './scopes.js';
 import { syncCache } from './cache.js';
 import {
-  isUserNoisy,
-  isUserMassFollower,
+  clampParam,
   filterAndSortFollowings,
+  UNKNOWN_SOURCE_LABELS,
   escapeHTML,
   sanitizeUrl,
   truncateText,
 } from './scoring.js';
+
+// Keep in step with SCAN_LIMIT in atproto.js (not imported so the API bundle stays lazy).
+const SCAN_LIMIT_LABEL = '2,500';
 
 // Application State
 let state = {
@@ -275,33 +278,26 @@ function setupEventListeners() {
   setupConfigPanel();
 
   // Parameters
-  document.getElementById('param-inactive-days').addEventListener('input', (e) => {
-    const val = parseInt(e.target.value, 10);
-    state.params.inactiveDays = Number.isNaN(val) ? 180 : val;
-    renderDashboard();
-  });
-
-  document.getElementById('param-low-followers').addEventListener('input', (e) => {
-    const val = parseInt(e.target.value, 10);
-    state.params.lowFollowersThreshold = Number.isNaN(val) ? 50 : val;
-    renderDashboard();
-  });
-
-  document.getElementById('param-noisy-posts').addEventListener('input', (e) => {
-    let val = parseInt(e.target.value, 10) || 20;
-    if (val > 100) {
-      val = 100;
-      e.target.value = '100';
-    }
-    state.params.noisyPostsThreshold = val;
-    renderDashboard();
-  });
-
-  document.getElementById('param-mass-follower').addEventListener('input', (e) => {
-    const val = parseInt(e.target.value, 10) || 3500;
-    state.params.massFollowerThreshold = val;
-    renderDashboard();
-  });
+  const paramInputs = {
+    'param-inactive-days': 'inactiveDays',
+    'param-low-followers': 'lowFollowersThreshold',
+    'param-noisy-posts': 'noisyPostsThreshold',
+    'param-mass-follower': 'massFollowerThreshold',
+  };
+  for (const [id, key] of Object.entries(paramInputs)) {
+    const input = document.getElementById(id);
+    input.addEventListener('input', () => {
+      // Leave an empty or half-typed field alone; clamp when it's a number.
+      if (input.value.trim() === '') return;
+      state.params[key] = clampParam(key, input.value);
+      renderDashboard();
+    });
+    input.addEventListener('change', () => {
+      state.params[key] = clampParam(key, input.value);
+      input.value = String(state.params[key]);
+      renderDashboard();
+    });
+  }
 
   // Search input with basic debounce
   let searchTimeout;
@@ -680,18 +676,22 @@ function initializeStateFromDOM() {
   state.filters.flagged = document.getElementById('filter-flagged').checked;
   state.filters.outlier = document.getElementById('filter-outlier').checked;
 
-  state.params.inactiveDays =
-    parseInt(document.getElementById('param-inactive-days').value, 10) || 180;
-  state.params.lowFollowersThreshold =
-    parseInt(document.getElementById('param-low-followers').value, 10) || 50;
-  let noisyVal = parseInt(document.getElementById('param-noisy-posts').value, 10) || 20;
-  if (noisyVal > 100) {
-    noisyVal = 100;
-    document.getElementById('param-noisy-posts').value = '100';
-  }
-  state.params.noisyPostsThreshold = noisyVal;
-  state.params.massFollowerThreshold =
-    parseInt(document.getElementById('param-mass-follower').value, 10) || 3500;
+  state.params.inactiveDays = clampParam(
+    'inactiveDays',
+    document.getElementById('param-inactive-days').value,
+  );
+  state.params.lowFollowersThreshold = clampParam(
+    'lowFollowersThreshold',
+    document.getElementById('param-low-followers').value,
+  );
+  state.params.noisyPostsThreshold = clampParam(
+    'noisyPostsThreshold',
+    document.getElementById('param-noisy-posts').value,
+  );
+  state.params.massFollowerThreshold = clampParam(
+    'massFollowerThreshold',
+    document.getElementById('param-mass-follower').value,
+  );
 }
 
 // --- Session & Authentication ---
@@ -987,6 +987,165 @@ function getFilteredAndSortedList() {
 }
 
 // --- Render Operations ---
+function formatCount(n) {
+  return typeof n === 'number' ? n.toLocaleString() : '—';
+}
+
+function badge(kind, title, label) {
+  return `<span class="badge badge-${kind}" title="${escapeHTML(title)}">${escapeHTML(label)}</span>`;
+}
+
+/**
+ * Criteria badges for a row, driven by the same evaluation as the score and filters so the
+ * OK badge and the OK filter always agree.
+ */
+function renderCriteriaBadges(item) {
+  const m = item.evaluation.matches;
+  const c = item.criteria;
+  const out = [];
+
+  if (item.isOk) {
+    out.push(badge('success', 'Nothing with a weight above 0 matches this account', 'OK'));
+  } else {
+    if (c.isDeleted)
+      out.push(badge('danger', 'This account has been deleted or deactivated', 'DELETED'));
+    if (c.isBanned)
+      out.push(badge('danger', 'This account has been taken down by Bluesky', 'BANNED'));
+    if (m.blocking) {
+      const title = c.isBlocked ? 'This account blocks you' : 'You block this account';
+      out.push(badge('danger', title, 'BLOCK'));
+    }
+    if (m.neverPosted) {
+      out.push(
+        badge(
+          'warning',
+          'Never Posted: No posts, replies or reposts found for this account',
+          'NEVER POSTED',
+        ),
+      );
+    } else if (m.inactive) {
+      out.push(
+        badge(
+          'warning',
+          `Inactive: No posts, replies or reposts in the last ${state.params.inactiveDays} days`,
+          'INACTIVE',
+        ),
+      );
+    }
+    if (m.notFollowing)
+      out.push(badge('secondary', 'This account does not follow you back', 'NO FOLLOW'));
+    if (m.noInbound) {
+      out.push(
+        badge(
+          'secondary',
+          `They have not liked, reposted, replied, quoted or messaged you recently (scanned your last ${SCAN_LIMIT_LABEL} notifications)`,
+          'NO INBOUND',
+        ),
+      );
+    }
+    if (m.noOutbound) {
+      out.push(
+        badge(
+          'secondary',
+          `You have not liked, replied to, reposted, quoted or messaged them recently (scanned your last ${SCAN_LIMIT_LABEL} posts and likes)`,
+          'NO OUTBOUND',
+        ),
+      );
+    }
+    if (m.noisy) {
+      out.push(
+        badge(
+          'warning',
+          `Noisy Poster: ${c.postsCount7Days ?? 'Many'} posts, replies and reposts in the last 7 days`,
+          'NOISY',
+        ),
+      );
+    }
+    if (m.muted)
+      out.push(badge('danger', 'Muted: You have muted this account on Bluesky', 'MUTED'));
+    if (m.massFollower) {
+      out.push(
+        badge(
+          'warning',
+          `Mass Follower: Follows ${formatCount(c.followsCount)} accounts on Bluesky`,
+          'MASS FOLLOW',
+        ),
+      );
+    }
+    if (m.spammyRatio) {
+      out.push(
+        badge(
+          'danger',
+          'Spammy Ratio: Follows far more accounts than follow it (follow-back farmer)',
+          'SPAMMY RATIO',
+        ),
+      );
+    }
+    if (m.flagged)
+      out.push(
+        badge('danger', 'Flagged: This account has moderation labels from Bluesky', 'FLAGGED'),
+      );
+    if (m.lowFollowers) {
+      out.push(
+        badge(
+          'secondary',
+          `Low Followers: Fewer than ${state.params.lowFollowersThreshold} followers`,
+          'LOW FOLLOWERS',
+        ),
+      );
+    }
+    if (m.outlier)
+      out.push(
+        badge(
+          'warning',
+          'Social Outlier: None of the accounts you follow follow them',
+          '0 MUTUALS',
+        ),
+      );
+  }
+
+  // Positive signals are shown either way.
+  if (item.evaluation.hasInbound) {
+    out.push(
+      badge(
+        'success',
+        `They liked, reposted, replied, quoted or messaged you recently (scanned your last ${SCAN_LIMIT_LABEL} notifications)`,
+        'THEY CONTACTED',
+      ),
+    );
+  }
+  if (item.evaluation.hasOutbound) {
+    out.push(
+      badge(
+        'success',
+        `You liked, replied to, reposted, quoted or messaged them recently (scanned your last ${SCAN_LIMIT_LABEL} posts and likes)`,
+        'I CONTACTED',
+      ),
+    );
+  }
+  if (typeof c.mutualsCount === 'number' && c.mutualsCount > 0) {
+    const label = formatMutualsCount(c);
+    const word = c.mutualsCount === 1 ? 'MUTUAL' : 'MUTUALS';
+    out.push(
+      badge('success', `${label} of the accounts you follow also follow them`, `${label} ${word}`),
+    );
+  }
+
+  const missing = item.evaluation.unknownSources;
+  if (missing.length > 0) {
+    const what = missing.map((s) => UNKNOWN_SOURCE_LABELS[s]).join(', ');
+    out.push(
+      badge(
+        'info',
+        `Couldn't fetch ${what} for this account, so criteria that depend on it are skipped. Resync to try again.`,
+        'INCOMPLETE',
+      ),
+    );
+  }
+
+  return out.join('');
+}
+
 function renderDashboard(resetSelection = true) {
   if (resetSelection) {
     state.selectedDids.clear();
@@ -1017,111 +1176,8 @@ function renderDashboard(resetSelection = true) {
       const row = document.createElement('tr');
       row.className = state.selectedDids.has(item.did) ? 'selected-row' : '';
 
-      // Build criteria badges (shortened with descriptive titles to save screen space)
-      let badgesHTML = '';
-      if (item.criteria.isDeleted) {
-        badgesHTML +=
-          '<span class="badge badge-danger" title="This account has been deleted or deactivated">DELETED</span>';
-      }
-      if (item.criteria.isBanned) {
-        badgesHTML +=
-          '<span class="badge badge-danger" title="This account has been suspended or flagged by Bluesky">BANNED</span>';
-      }
-      if (item.criteria.isBlocking || item.criteria.isBlocked) {
-        badgesHTML +=
-          '<span class="badge badge-danger" title="This account is blocking you or blocked by you">BLOCK</span>';
-      }
-      if (item.neverPosted) {
-        badgesHTML +=
-          '<span class="badge badge-warning" title="Never Posted: No posts, replies or reposts found for this account">NEVER POSTED</span>';
-      } else if (item.dynamicInactive) {
-        badgesHTML += `<span class="badge badge-warning" title="Inactive: No posts, replies or reposts in the last ${state.params.inactiveDays} days">INACTIVE</span>`;
-      }
-      if (!item.criteria.isFollowingUser) {
-        badgesHTML +=
-          '<span class="badge badge-secondary" title="This account does not follow you back">NO FOLLOW</span>';
-      }
-
-      const hasInbound =
-        item.criteria.hasLikedUser ||
-        item.criteria.hasRepostedUser ||
-        item.criteria.hasRepliedToUser ||
-        item.criteria.hasMessagedUser ||
-        item.criteria.userInteracted;
-      const hasOutbound = item.criteria.userContactedThem;
-
-      let warningsCount = 0;
-      if (item.criteria.isDeleted || item.criteria.isBanned) warningsCount++;
-      if (item.criteria.isBlocking || item.criteria.isBlocked) warningsCount++;
-      if (item.neverPosted || item.dynamicInactive) warningsCount++;
-      if (!item.criteria.isFollowingUser) warningsCount++;
-
-      if (!hasInbound) {
-        badgesHTML +=
-          '<span class="badge badge-secondary" title="They have not liked, replied, or messaged you recently (scanned your last 2,500 notifications)">NO INBOUND</span>';
-        warningsCount++;
-      } else {
-        badgesHTML +=
-          '<span class="badge badge-success" title="They liked, replied, or messaged you recently (scanned your last 2,500 notifications)">THEY CONTACTED</span>';
-      }
-
-      if (!hasOutbound) {
-        badgesHTML +=
-          '<span class="badge badge-secondary" title="You have not liked, replied, or reposted them recently (scanned your last 2,500 posts and likes)">NO OUTBOUND</span>';
-        warningsCount++;
-      } else {
-        badgesHTML +=
-          '<span class="badge badge-success" title="You liked, replied, or reposted them recently (scanned your last 2,500 posts and likes)">I CONTACTED</span>';
-      }
-
-      if (isUserNoisy(item, state.params.noisyPostsThreshold)) {
-        const countStr =
-          item.criteria.postsCount7Days !== undefined ? `${item.criteria.postsCount7Days}` : '10+';
-        badgesHTML += `<span class="badge badge-warning" title="Noisy Poster: High volume of posts, replies and reposts (${escapeHTML(countStr)} in last 7 days)">NOISY</span>`;
-        warningsCount++;
-      }
-
-      if (item.criteria.isMuted) {
-        badgesHTML +=
-          '<span class="badge badge-danger" title="Muted: This account is currently muted by you on Bluesky">MUTED</span>';
-        warningsCount++;
-      }
-
-      if (isUserMassFollower(item, state.params.massFollowerThreshold)) {
-        const followsCountStr =
-          item.criteria.followsCount !== undefined
-            ? `${item.criteria.followsCount.toLocaleString()}`
-            : '3,500+';
-        badgesHTML += `<span class="badge badge-warning" title="Mass Follower: Follows ${escapeHTML(followsCountStr)} accounts on Bluesky">MASS FOLLOW</span>`;
-        warningsCount++;
-      }
-
-      if (item.criteria.isSpammyRatio) {
-        badgesHTML +=
-          '<span class="badge badge-danger" title="Spammy Ratio: Following count is significantly higher than followers count (follow-back farmer)">SPAMMY RATIO</span>';
-        warningsCount++;
-      }
-
-      if (item.criteria.isFlagged) {
-        badgesHTML +=
-          '<span class="badge badge-danger" title="Flagged: This account has moderation flags or labels from Bluesky Moderation">FLAGGED</span>';
-        warningsCount++;
-      }
-
-      if (item.criteria.isOutlier) {
-        badgesHTML +=
-          '<span class="badge badge-warning" title="Social Outlier: Has 0 mutual follows in common with you on Bluesky">0 MUTUALS</span>';
-        warningsCount++;
-      } else if (item.criteria.mutualsCount > 0) {
-        const mutualsLabel = formatMutualsCount(item.criteria);
-        const mutualWord = item.criteria.mutualsCount === 1 ? 'MUTUAL' : 'MUTUALS';
-        badgesHTML += `<span class="badge badge-success" title="Mutual Social Graph: Has ${escapeHTML(mutualsLabel)} mutual follow${item.criteria.mutualsCount === 1 ? '' : 's'} in common with you on Bluesky">${escapeHTML(mutualsLabel)} ${mutualWord}</span>`;
-      }
-
-      if (warningsCount === 0) {
-        badgesHTML =
-          '<span class="badge badge-success" title="Meets all positive criteria checks">OK</span>';
-      }
+      let badgesHTML;
+      badgesHTML = renderCriteriaBadges(item);
 
       const isLocked = state.lockedDids.has(item.did);
       if (isLocked) {
@@ -1151,7 +1207,7 @@ function renderDashboard(resetSelection = true) {
         row.classList.add('selected-row');
       }
 
-      const isLowFollowers = item.criteria.followersCount < state.params.lowFollowersThreshold;
+      const isLowFollowers = item.evaluation.matches.lowFollowers === true;
       const isPostInactive = item.neverPosted || item.dynamicInactive;
 
       let isInteractionInactive = true;
@@ -1177,6 +1233,7 @@ function renderDashboard(resetSelection = true) {
             reply: 'Reply',
             repost: 'Repost',
             message: 'DM',
+            quote: 'Quote',
           };
           typeLabel = ` (${escapeHTML(typeMap[interactionInfo.type] || interactionInfo.type)})`;
         }
@@ -1239,7 +1296,7 @@ function renderDashboard(resetSelection = true) {
             <button type="button" class="preview-btn" aria-label="Preview @${safeHandle}" aria-haspopup="dialog">ⓘ</button>
           </div>
         </td>
-        <td class="col-meta col-followers ${isLowFollowers ? 'criteria-highlight' : ''}" data-label="Followers" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${item.criteria.followersCount.toLocaleString()}</td>
+        <td class="col-meta col-followers ${isLowFollowers ? 'criteria-highlight' : ''}" data-label="Followers" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(formatCount(item.criteria.followersCount))}</td>
         <td class="col-meta col-last-post ${isPostInactive ? 'criteria-highlight' : ''}" data-label="Last post" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(formatRelativeDate(item.criteria.lastPostDate))}</td>
         <td class="col-meta col-last-interaction ${isInteractionInactive ? 'criteria-highlight' : ''}" data-label="Last interaction" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${cellContentHTML}</td>
         <td class="col-flags" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">

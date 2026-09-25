@@ -13,6 +13,9 @@ import {
   calculateScore,
   filterAndSortFollowings,
   summariseAuthorActivity,
+  evaluateCriteria,
+  isEvaluationOk,
+  clampParam,
 } from '../src/scoring.js';
 
 const defaultWeights = {
@@ -67,6 +70,7 @@ test('Scoring & Sanitization Helpers', async (t) => {
       'https://cdn.bsky.app/img/avatar&quot; onerror=&quot;alert(1)',
     );
     assert.strictEqual(sanitizeUrl('javascript:alert(1)', 'fallback'), 'fallback');
+    assert.strictEqual(sanitizeUrl('http://example.com/a.png', 'fallback'), 'fallback');
     assert.strictEqual(
       truncateText('VeryLongDisplayName', 10),
       '<abbr title="VeryLongDisplayName" style="text-decoration: none; cursor: help; border-bottom: none;">VeryLon...</abbr>',
@@ -293,5 +297,125 @@ test('Scoring & Sanitization Helpers', async (t) => {
       isUserNeverPosted({ criteria: { lastPostDate: repostOnly.lastPostDate } }),
       false,
     );
+  });
+
+  await t.test('failed fetches make criteria unknown instead of negative', () => {
+    const now = Date.now();
+    const item = {
+      did: 'did:plc:unknown',
+      criteria: {
+        isFollowingUser: true,
+        lastPostDate: null,
+        postsCount7Days: 0,
+        followersCount: 0,
+        followsCount: 0,
+        unknown: ['activity', 'profile', 'inbound', 'outbound'],
+      },
+    };
+    const { matches, unknownSources } = evaluateCriteria(item, defaultParams, now);
+    for (const id of [
+      'neverPosted',
+      'inactive',
+      'noisy',
+      'lowFollowers',
+      'muted',
+      'noInbound',
+      'noOutbound',
+    ]) {
+      assert.strictEqual(matches[id], null, id);
+    }
+    assert.deepStrictEqual(unknownSources.sort(), ['activity', 'inbound', 'outbound', 'profile']);
+    assert.strictEqual(
+      calculateScore(item, { ...defaultWeights, lowFollowers: 5 }, defaultParams, now),
+      0,
+    );
+
+    // Contact that was found still counts even if another scan failed.
+    const contacted = evaluateCriteria(
+      {
+        criteria: { hasLikedUser: true, userContactedThem: true, unknown: ['inbound', 'outbound'] },
+      },
+      defaultParams,
+      now,
+    );
+    assert.strictEqual(contacted.matches.noInbound, false);
+    assert.strictEqual(contacted.matches.noOutbound, false);
+
+    // Mutuals that weren't looked up are unknown; a looked-up 0 is an outlier.
+    assert.strictEqual(evaluateCriteria({ criteria: {} }).matches.outlier, null);
+    assert.strictEqual(evaluateCriteria({ criteria: { mutualsCount: 0 } }).matches.outlier, true);
+
+    // Unknown criteria never match a filter.
+    const shown = filterAndSortFollowings(
+      [
+        {
+          did: 'did:plc:unknown',
+          handle: 'u',
+          criteria: {
+            ...item.criteria,
+            hasLikedUser: true,
+            userContactedThem: true,
+            mutualsCount: 3,
+          },
+        },
+      ],
+      {
+        searchQuery: '',
+        weights: defaultWeights,
+        filters: {
+          ...Object.fromEntries(Object.keys(defaultFilters).map((k) => [k, false])),
+          neverPosted: false,
+          lowFollowers: true,
+        },
+        params: defaultParams,
+        sorting: { col: 'score', order: 'desc' },
+      },
+      now,
+    );
+    assert.strictEqual(shown.length, 0);
+  });
+
+  await t.test('OK ignores zero-weight criteria so the badge and filter agree', () => {
+    const now = Date.now();
+    const item = {
+      did: 'did:plc:small',
+      criteria: {
+        isFollowingUser: true,
+        lastPostDate: new Date(now - 1000).toISOString(),
+        postsCount7Days: 1,
+        hasLikedUser: true,
+        userContactedThem: true,
+        followersCount: 10,
+        followsCount: 10,
+        mutualsCount: 4,
+      },
+    };
+    const evaluation = evaluateCriteria(item, defaultParams, now);
+    assert.strictEqual(evaluation.matches.lowFollowers, true);
+    assert.strictEqual(isEvaluationOk(evaluation, { ...defaultWeights, lowFollowers: 0 }), true);
+    assert.strictEqual(isEvaluationOk(evaluation, { ...defaultWeights, lowFollowers: 1 }), false);
+
+    const [row] = filterAndSortFollowings(
+      [{ ...item, handle: 'small' }],
+      {
+        searchQuery: '',
+        weights: { ...defaultWeights, lowFollowers: 0 },
+        filters: { ...defaultFilters, lowFollowers: false },
+        params: defaultParams,
+        sorting: { col: 'score', order: 'desc' },
+      },
+      now,
+    );
+    assert.strictEqual(row.isOk, true);
+    assert.strictEqual(row.score, 0);
+  });
+
+  await t.test('clampParam keeps 0, clamps to bounds and defaults junk', () => {
+    assert.strictEqual(clampParam('lowFollowersThreshold', '0'), 0);
+    assert.strictEqual(clampParam('lowFollowersThreshold', ''), 50);
+    assert.strictEqual(clampParam('noisyPostsThreshold', '500'), 100);
+    assert.strictEqual(clampParam('noisyPostsThreshold', '0'), 1);
+    assert.strictEqual(clampParam('inactiveDays', 'abc'), 180);
+    assert.strictEqual(clampParam('massFollowerThreshold', 50), 100);
   });
 });

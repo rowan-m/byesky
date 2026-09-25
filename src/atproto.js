@@ -41,6 +41,43 @@ export function createAgent(sessionOrOptions) {
 // Keep the badge tooltips in main.js in step if this changes.
 export const SCAN_LIMIT = 2500;
 
+/** DM conversations are read 100 at a time, up to this many pages. */
+const MAX_CONVO_PAGES = 10;
+
+/** The author a post quotes, from an app.bsky.embed.record or recordWithMedia view. */
+export function quotedAuthorDid(embed) {
+  if (!embed) return null;
+  const record = embed.record?.record ?? embed.record;
+  return record?.author?.did || null;
+}
+
+/**
+ * Records what an error fetching an account's feed tells us, using the XRPC error name
+ * rather than matching message text. Anything else (network, server) means the account's
+ * activity is unknown, not that it has never posted.
+ */
+export function applyActorError(f, err) {
+  switch (err?.error) {
+    case 'AccountTakedown':
+      f.criteria.isBanned = true;
+      return;
+    case 'AccountDeactivated':
+      f.criteria.isDeleted = true;
+      return;
+    case 'BlockedActor': // you block them
+      f.criteria.isBlocking = true;
+      return;
+    case 'BlockedByActor': // they block you
+      f.criteria.isBlocked = true;
+      return;
+  }
+  if (err?.status === 400 && /profile not found|could not find repo/i.test(err.message || '')) {
+    f.criteria.isDeleted = true;
+    return;
+  }
+  f.criteria.unknown = [...(f.criteria.unknown || []), 'activity'];
+}
+
 /**
  * The phases of a sync, in order. The UI shows "Step n of N" from these so the user can
  * see how far through the whole analysis they are, not just the current phase.
@@ -252,6 +289,7 @@ async function runSync(agent, userDid, onUpdate) {
         followersCount: 0,
         followsCount: 0,
         postsCount: 0,
+        unknown: [], // data sources that couldn't be fetched (see scoring.UNKNOWN_SOURCE_LABELS)
       },
       score: 0,
     };
@@ -264,6 +302,9 @@ async function runSync(agent, userDid, onUpdate) {
   if (onUpdate) onUpdate();
 
   // Fetch interactions: Notifications and DMs
+  // If a scan fails, "no contact" can't be concluded for anyone it didn't reach.
+  let inboundFailed = false;
+  let outboundFailed = false;
   const interactions = {
     likedBy: new Set(),
     repostedBy: new Set(),
@@ -304,15 +345,23 @@ async function runSync(agent, userDid, onUpdate) {
       for (const notif of notifsList) {
         if (!notif.author) continue;
         const actorDid = notif.author.did;
-        if (notif.reason === 'like') {
-          interactions.likedBy.add(actorDid);
-        } else if (notif.reason === 'repost') {
-          interactions.repostedBy.add(actorDid);
-        } else if (notif.reason === 'reply') {
-          interactions.repliedBy.add(actorDid);
-          interactions.userInteractedWith.add(actorDid);
-        } else if (notif.reason === 'mention') {
-          interactions.userInteractedWith.add(actorDid);
+        switch (notif.reason) {
+          case 'like':
+          case 'like-via-repost':
+            interactions.likedBy.add(actorDid);
+            break;
+          case 'repost':
+          case 'repost-via-repost':
+            interactions.repostedBy.add(actorDid);
+            break;
+          case 'reply':
+            interactions.repliedBy.add(actorDid);
+            interactions.userInteractedWith.add(actorDid);
+            break;
+          case 'mention':
+          case 'quote':
+            interactions.userInteractedWith.add(actorDid);
+            break;
         }
       }
 
@@ -332,43 +381,48 @@ async function runSync(agent, userDid, onUpdate) {
   } catch (err) {
     if (err.message === 'Sync cancelled') return;
     console.warn('Could not fetch notifications for interactions:', err);
+    inboundFailed = true;
   }
 
+  // DMs. Only accepted conversations count: a request you haven't accepted isn't contact
+  // you've engaged with (and is often spam).
   try {
     const chatAgent = agent.withProxy('bsky_chat', 'did:web:api.bsky.chat');
-    if (chatAgent.chat?.bsky?.convo) {
-      const convos = await fetchWithBackoff(
+    let convoCursor;
+    let pages = 0;
+    do {
+      const res = await fetchWithBackoff(
         userDid,
-        () => chatAgent.chat.bsky.convo.listConvos({ limit: 50 }),
+        () => chatAgent.chat.bsky.convo.listConvos({ limit: 100, cursor: convoCursor }),
         onUpdate,
         limiters.pds,
       );
-      if (convos.data && convos.data.convos) {
-        for (const convo of convos.data.convos) {
-          if (!convo.members) continue;
-          for (const member of convo.members) {
-            if (member.did !== userDid) {
-              interactions.messagedBy.add(member.did);
-              interactions.userInteractedWith.add(member.did);
-              userOutboundInteractions.add(member.did);
-
-              const msgDate = convo.lastMessage?.sentAt;
-              if (msgDate) {
-                updateInteraction(
-                  member.did,
-                  msgDate,
-                  'message',
-                  `https://bsky.app/messages/convo/${encodeURIComponent(convo.id)}`,
-                );
-              }
-            }
+      for (const convo of res.data.convos || []) {
+        if (convo.status && convo.status !== 'accepted') continue;
+        if (!convo.lastMessage) continue;
+        for (const member of convo.members || []) {
+          if (member.did === userDid) continue;
+          interactions.messagedBy.add(member.did);
+          interactions.userInteractedWith.add(member.did);
+          userOutboundInteractions.add(member.did);
+          const msgDate = convo.lastMessage.sentAt;
+          if (msgDate) {
+            updateInteraction(
+              member.did,
+              msgDate,
+              'message',
+              `https://bsky.app/messages/${encodeURIComponent(convo.id)}`,
+            );
           }
         }
       }
-    }
+      convoCursor = res.data.cursor;
+      pages++;
+    } while (convoCursor && pages < MAX_CONVO_PAGES);
   } catch (err) {
     if (err.message === 'Sync cancelled') return;
     console.warn('Could not fetch chat conversations:', err);
+    inboundFailed = true;
   }
 
   await syncCache.updateProgress(
@@ -428,6 +482,14 @@ async function runSync(agent, userDid, onUpdate) {
               updateInteraction(authorDid, repostDate, 'repost', atUriToBskyUrl(item.post.uri));
           }
         }
+        // Quote posts: the quoted author is in the embed (plain or with media).
+        const quotedDid = quotedAuthorDid(item.post?.embed);
+        if (!item.reason && quotedDid && quotedDid !== userDid) {
+          userOutboundInteractions.add(quotedDid);
+          const quoteDate = item.post.indexedAt || item.post.record?.createdAt;
+          if (quoteDate)
+            updateInteraction(quotedDid, quoteDate, 'quote', atUriToBskyUrl(item.post.uri));
+        }
       }
 
       feedFetched += feedList.length;
@@ -445,6 +507,7 @@ async function runSync(agent, userDid, onUpdate) {
   } catch (err) {
     if (err.message === 'Sync cancelled') return;
     console.warn('Could not fetch outbound feed for interactions:', err);
+    outboundFailed = true;
   }
 
   // 2. Scan your own liked records (up to SCAN_LIMIT items)
@@ -514,10 +577,13 @@ async function runSync(agent, userDid, onUpdate) {
   } catch (err) {
     if (err.message === 'Sync cancelled') return;
     console.warn('Could not fetch outbound likes for interactions:', err);
+    outboundFailed = true;
   }
 
   // Update initial interaction flags on the list
   for (const f of followingsList) {
+    if (inboundFailed) f.criteria.unknown.push('inbound');
+    if (outboundFailed) f.criteria.unknown.push('outbound');
     if (interactions.likedBy.has(f.did)) f.criteria.hasLikedUser = true;
     if (interactions.repostedBy.has(f.did)) f.criteria.hasRepostedUser = true;
     if (interactions.repliedBy.has(f.did)) f.criteria.hasRepliedToUser = true;
@@ -608,6 +674,7 @@ async function runSync(agent, userDid, onUpdate) {
     } catch (err) {
       if (err.message === 'Sync cancelled') return;
       console.warn(`Error fetching profile stats batch starting at ${i}:`, err);
+      for (const f of batch) f.criteria.unknown.push('profile');
     }
 
     // Save batch progress so client has current data
@@ -680,18 +747,7 @@ async function runSync(agent, userDid, onUpdate) {
       } catch (err) {
         if (err.message === 'Sync cancelled') throw err;
         console.warn(`Could not fetch post activity for ${f.handle || f.did}:`, err.message || err);
-        const errMsg = (err.message || '').toLowerCase();
-        if (
-          err.status === 400 &&
-          (errMsg.includes('banned') ||
-            errMsg.includes('deactivated') ||
-            errMsg.includes('suspended') ||
-            errMsg.includes('deleted'))
-        ) {
-          f.criteria.isBanned = true;
-        } else if (err.status === 403 || errMsg.includes('block')) {
-          f.criteria.isBlocking = true;
-        }
+        applyActorError(f, err);
       }
 
       // 2. Get latest like timestamp (Bypassed sequentially as outbound likes are already mapped in Phase 1)
@@ -854,7 +910,6 @@ export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
 
       for (const item of chunk) {
         item.f.followingUri = null;
-        item.f.criteria.isBlocked = false;
         results.success.push(item.did);
       }
     } catch (batchErr) {
@@ -876,7 +931,6 @@ export async function batchUnfollow(agent, userDid, targetDids, onUpdate) {
             maxAttempts: 3,
           });
           item.f.followingUri = null;
-          item.f.criteria.isBlocked = false;
           results.success.push(item.did);
         } catch (err) {
           console.error(`Error unfollowing ${item.f.handle || item.did}:`, err);
