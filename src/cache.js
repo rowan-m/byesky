@@ -176,14 +176,20 @@ class UserSyncCache {
     return this.set(did, { lockedDids: cleanArray });
   }
 
+  /**
+   * Updates sync progress. `extraData.step` (`{ index, total, id, label }`) records which
+   * phase of the sync is running; other `extraData` keys are merged into the cache entry.
+   */
   async updateProgress(did, processed, total, stage, extraData = {}) {
     const current = await this.get(did);
+    const { step, ...rest } = extraData;
     const progress = {
       total: total !== undefined ? total : current.progress.total,
       processed: processed !== undefined ? processed : current.progress.processed,
       currentStage: stage || current.progress.currentStage,
+      step: step !== undefined ? step : current.progress.step,
     };
-    return this.set(did, { ...extraData, progress });
+    return this.set(did, { ...rest, progress });
   }
 
   async clear(did) {

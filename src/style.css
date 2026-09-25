@@ -384,6 +384,48 @@ input[type='number']:focus {
   color: var(--text-secondary);
 }
 
+.sync-step-title {
+  margin: 20px 0 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sync-step-count {
+  color: var(--primary);
+  margin-right: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sync-eta {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.skip-mutuals {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.skip-mutuals p {
+  margin: 0;
+  flex: 1 1 260px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.skip-mutuals.hidden {
+  display: none;
+}
+
 /* Dashboard Grid Layout */
 .dashboard-grid {
   display: grid;

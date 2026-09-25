@@ -15,6 +15,24 @@ export function createAgent(sessionOrOptions) {
 }
 
 /**
+ * The phases of a sync, in order. The UI shows "Step n of N" from these so the user can
+ * see how far through the whole analysis they are, not just the current phase.
+ */
+export const SYNC_STEPS = [
+  { id: 'follows', label: 'Fetching the accounts you follow' },
+  { id: 'notifications', label: 'Scanning your notifications and DMs' },
+  { id: 'ownPosts', label: 'Scanning your posts, replies and reposts' },
+  { id: 'likes', label: 'Scanning your likes' },
+  { id: 'profiles', label: 'Fetching profile statistics' },
+  { id: 'activity', label: 'Checking recent activity and mutual followers' },
+];
+
+function syncStep(id) {
+  const index = SYNC_STEPS.findIndex((s) => s.id === id);
+  return { id, index: index + 1, total: SYNC_STEPS.length, label: SYNC_STEPS[index].label };
+}
+
+/**
  * Initiates the progressive sync and scoring process.
  * Runs asynchronously in the browser.
  */
@@ -107,9 +125,13 @@ async function runSync(agent, userDid, onUpdate) {
     syncSessionId: syncSessionId,
     error: null,
     followings: [],
+    skipMutuals: false,
+    mutualsSkipped: false,
     lastUpdated: Date.now(),
   });
-  await syncCache.updateProgress(userDid, 0, 0, 'Retrieving follows list from Bluesky...');
+  await syncCache.updateProgress(userDid, 0, 0, 'Retrieving follows list from Bluesky...', {
+    step: syncStep('follows'),
+  });
   if (onUpdate) onUpdate();
 
   let follows = [];
@@ -203,7 +225,7 @@ async function runSync(agent, userDid, onUpdate) {
         isOutlier: false,
         isNoisy: false,
         postsCount7Days: 0,
-        mutualsCount: 0,
+        mutualsCount: undefined, // unknown until looked up (may be skipped)
         lastPostDate: null,
         lastLikeDate: null,
         lastInteraction: null,
@@ -233,8 +255,9 @@ async function runSync(agent, userDid, onUpdate) {
   await syncCache.updateProgress(
     userDid,
     0,
-    totalFollows,
+    1000,
     'Fetching interaction history (notifications & DMs)...',
+    { step: syncStep('notifications') },
   );
   if (onUpdate) onUpdate();
 
@@ -278,7 +301,12 @@ async function runSync(agent, userDid, onUpdate) {
 
       // Update progress so user knows we are retrieving notification history pages
       const progressMessage = `Fetching interaction history (notifications ${fetchedCount}/${maxNotificationsToScan})...`;
-      await syncCache.updateProgress(userDid, 0, totalFollows, progressMessage);
+      await syncCache.updateProgress(
+        userDid,
+        Math.min(fetchedCount, maxNotificationsToScan),
+        maxNotificationsToScan,
+        progressMessage,
+      );
       if (onUpdate) onUpdate();
     } while (cursor && fetchedCount < maxNotificationsToScan);
   } catch (err) {
@@ -329,8 +357,9 @@ async function runSync(agent, userDid, onUpdate) {
   await syncCache.updateProgress(
     userDid,
     0,
-    totalFollows,
+    1000,
     'Mapping your outbound feed interactions (replies & reposts)...',
+    { step: syncStep('ownPosts') },
   );
   if (onUpdate) onUpdate();
 
@@ -388,7 +417,12 @@ async function runSync(agent, userDid, onUpdate) {
       feedCursor = response.data.cursor;
 
       const progressMessage = `Mapping your outbound feed interactions (${feedFetched}/${maxFeedToScan})...`;
-      await syncCache.updateProgress(userDid, 0, totalFollows, progressMessage);
+      await syncCache.updateProgress(
+        userDid,
+        Math.min(feedFetched, maxFeedToScan),
+        maxFeedToScan,
+        progressMessage,
+      );
       if (onUpdate) onUpdate();
     } while (feedCursor && feedFetched < maxFeedToScan);
   } catch (err) {
@@ -402,12 +436,9 @@ async function runSync(agent, userDid, onUpdate) {
     let likesFetched = 0;
     const maxLikesToScan = 1000;
 
-    await syncCache.updateProgress(
-      userDid,
-      0,
-      totalFollows,
-      'Mapping your outbound liked posts...',
-    );
+    await syncCache.updateProgress(userDid, 0, 1000, 'Mapping your outbound liked posts...', {
+      step: syncStep('likes'),
+    });
     if (onUpdate) onUpdate();
 
     do {
@@ -455,7 +486,12 @@ async function runSync(agent, userDid, onUpdate) {
       likesCursor = response.data.cursor;
 
       const progressMessage = `Mapping your outbound liked posts (${likesFetched}/${maxLikesToScan})...`;
-      await syncCache.updateProgress(userDid, 0, totalFollows, progressMessage);
+      await syncCache.updateProgress(
+        userDid,
+        Math.min(likesFetched, maxLikesToScan),
+        maxLikesToScan,
+        progressMessage,
+      );
       if (onUpdate) onUpdate();
     } while (likesCursor && likesFetched < maxLikesToScan);
   } catch (err) {
@@ -500,6 +536,9 @@ async function runSync(agent, userDid, onUpdate) {
   if (onUpdate) onUpdate();
 
   // Enrich profiles with follower and post counts in batches of 25
+  await syncCache.updateProgress(userDid, 0, totalFollows, 'Fetching profile statistics...', {
+    step: syncStep('profiles'),
+  });
   const batchSize = 25;
   for (let i = 0; i < followingsList.length; i += batchSize) {
     // Check for cancellation or newer session takeover
@@ -565,6 +604,7 @@ async function runSync(agent, userDid, onUpdate) {
     0,
     totalFollows,
     'Analyzing activity (last posts and last likes)...',
+    { step: syncStep('activity') },
   );
   if (onUpdate) onUpdate();
 
@@ -572,6 +612,7 @@ async function runSync(agent, userDid, onUpdate) {
   // while individual requests are in flight.
   const concurrencyLimit = 6;
   let activeIndex = 0;
+  let mutualsSkipped = false;
 
   async function worker() {
     while (activeIndex < followingsList.length) {
@@ -628,35 +669,40 @@ async function runSync(agent, userDid, onUpdate) {
 
       // 2. Get latest like timestamp (Bypassed sequentially as outbound likes are already mapped in Phase 1)
 
-      // 3. Get mutual follows count (Social Outlier check)
-      try {
-        const mutualsRes = await fetchWithBackoff(
-          userDid,
-          () =>
-            pdsAgent.api.app.bsky.graph.getKnownFollowers({
-              actor: f.did,
-              limit: 11,
-            }),
-          onUpdate,
-          limiters.pds,
-        );
-        const mutuals = mutualsRes.data.followers || [];
-        f.criteria.mutualsCount = mutuals.length;
-        f.criteria.hasMoreMutuals = mutuals.length > 10;
-        f.criteria.isOutlier = mutuals.length === 0;
-        f.preview = f.preview || { mutuals: [], lastPost: null };
-        f.preview.mutuals = mutuals.slice(0, 5).map((m) => ({
-          did: m.did,
-          handle: m.handle,
-          displayName: m.displayName || m.handle,
-          avatar: m.avatar || '',
-        }));
-      } catch (err) {
-        if (err.message === 'Sync cancelled') throw err;
-        console.warn(
-          `Could not fetch mutual follows for ${f.handle || f.did}:`,
-          err.message || err,
-        );
+      // 3. Get mutual follows count (Social Outlier check). The user can skip this to halve
+      // the time the step takes; mutuals are then fetched on demand when previewing.
+      if (cachedCheck.skipMutuals) {
+        mutualsSkipped = true;
+      } else {
+        try {
+          const mutualsRes = await fetchWithBackoff(
+            userDid,
+            () =>
+              pdsAgent.api.app.bsky.graph.getKnownFollowers({
+                actor: f.did,
+                limit: 11,
+              }),
+            onUpdate,
+            limiters.pds,
+          );
+          const mutuals = mutualsRes.data.followers || [];
+          f.criteria.mutualsCount = mutuals.length;
+          f.criteria.hasMoreMutuals = mutuals.length > 10;
+          f.criteria.isOutlier = mutuals.length === 0;
+          f.preview = f.preview || { mutuals: [], lastPost: null };
+          f.preview.mutuals = mutuals.slice(0, 5).map((m) => ({
+            did: m.did,
+            handle: m.handle,
+            displayName: m.displayName || m.handle,
+            avatar: m.avatar || '',
+          }));
+        } catch (err) {
+          if (err.message === 'Sync cancelled') throw err;
+          console.warn(
+            `Could not fetch mutual follows for ${f.handle || f.did}:`,
+            err.message || err,
+          );
+        }
       }
 
       // Periodically update progress
@@ -700,6 +746,7 @@ async function runSync(agent, userDid, onUpdate) {
     {
       status: 'completed',
       followings: followingsList,
+      mutualsSkipped,
     },
   );
   if (onUpdate) onUpdate();

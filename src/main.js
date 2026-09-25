@@ -93,6 +93,11 @@ const syncProgressBar = document.getElementById('sync-progress-bar');
 const syncStage = document.getElementById('sync-stage');
 const syncPercent = document.getElementById('sync-percent');
 const syncError = document.getElementById('sync-error');
+const syncStepTitle = document.getElementById('sync-step-title');
+const syncProgressTrack = document.getElementById('sync-progress-track');
+const syncEta = document.getElementById('sync-eta');
+const skipMutualsPanel = document.getElementById('skip-mutuals');
+const skipMutualsBtn = document.getElementById('skip-mutuals-btn');
 const cancelSyncBtn = document.getElementById('cancel-sync-btn');
 const retrySyncBtn = document.getElementById('retry-sync-btn');
 
@@ -379,6 +384,7 @@ function setupEventListeners() {
   // Cancel and Retry Sync buttons
   cancelSyncBtn.addEventListener('click', handleCancelSync);
   retrySyncBtn.addEventListener('click', handleRetrySync);
+  skipMutualsBtn?.addEventListener('click', handleSkipMutuals);
 
   // Keep singleton hover card visible when hovered directly
   if (hoverCard) {
@@ -1473,6 +1479,8 @@ function showSyncSection(syncState) {
 
 function showSyncError(errMessage) {
   hideLoading();
+  skipMutualsPanel?.classList.add('hidden');
+  syncEta?.classList.add('hidden');
   syncSection.classList.remove('hidden');
   syncStage.textContent = 'Sync Failed';
   syncPercent.textContent = '';
@@ -1484,6 +1492,8 @@ function showSyncError(errMessage) {
 
 function showSyncCancelled(errMessage) {
   hideLoading();
+  skipMutualsPanel?.classList.add('hidden');
+  syncEta?.classList.add('hidden');
   syncSection.classList.remove('hidden');
   syncStage.textContent = 'Sync Cancelled';
   syncPercent.textContent = '';
@@ -1517,20 +1527,82 @@ async function handleRetrySync() {
   await triggerSync();
 }
 
-function updateSyncProgressUI(syncState) {
-  syncStage.textContent = syncState.progress.currentStage || 'Syncing...';
+// Tracks progress within the current step to estimate the time remaining.
+let etaSample = null;
 
-  let percent = 0;
-  if (syncState.progress.total > 0) {
-    percent = Math.round((syncState.progress.processed / syncState.progress.total) * 100);
-  } else if (syncState.status === 'fetching' && syncState.totalCount > 0) {
-    percent = 25; // Dummy progress for fetching follows phase
-  } else if (syncState.status === 'enriching') {
-    percent = 50; // Dummy baseline
+function updateSyncProgressUI(syncState) {
+  const { progress = {} } = syncState;
+  const step = progress.step;
+  const skipped = Boolean(syncState.skipMutuals);
+
+  if (step) {
+    const label = step.id === 'activity' && skipped ? 'Checking recent activity' : step.label || '';
+    const count = document.createElement('span');
+    count.className = 'sync-step-count';
+    count.textContent = `Step ${step.index} of ${step.total}:`;
+    syncStepTitle.replaceChildren(count, label);
+  } else {
+    syncStepTitle.textContent = 'Starting sync…';
   }
 
+  syncStage.textContent = progress.currentStage || 'Syncing...';
+
+  let percent = 0;
+  if (progress.total > 0) {
+    percent = Math.round((progress.processed / progress.total) * 100);
+  }
+  percent = Math.max(0, Math.min(100, percent));
   syncProgressBar.style.width = `${percent}%`;
   syncPercent.textContent = `${percent}%`;
+  syncProgressTrack?.setAttribute('aria-valuenow', String(percent));
+  syncProgressTrack?.setAttribute(
+    'aria-valuetext',
+    step ? `Step ${step.index} of ${step.total}, ${percent}%` : `${percent}%`,
+  );
+
+  const inActivityStep = step?.id === 'activity' && syncState.status === 'enriching';
+  skipMutualsPanel?.classList.toggle('hidden', !inActivityStep || skipped);
+  updateSyncEta(step, progress);
+}
+
+function updateSyncEta(step, progress) {
+  if (!syncEta) return;
+  const isLongStep = step && (step.id === 'activity' || step.id === 'profiles');
+  if (!isLongStep || !progress.total || progress.total <= 0) {
+    etaSample = null;
+    syncEta.classList.add('hidden');
+    return;
+  }
+
+  const now = Date.now();
+  if (!etaSample || etaSample.stepId !== step.id || progress.processed < etaSample.processed) {
+    etaSample = { stepId: step.id, time: now, processed: progress.processed };
+    syncEta.classList.add('hidden');
+    return;
+  }
+
+  const done = progress.processed - etaSample.processed;
+  const elapsed = now - etaSample.time;
+  if (done < 10 || elapsed < 5000) return; // wait for a stable rate
+  const remainingMs = ((progress.total - progress.processed) / done) * elapsed;
+  const minutes = Math.round(remainingMs / 60000);
+  let text = 'Less than a minute left in this step';
+  if (minutes >= 2) text = `About ${minutes} minutes left in this step`;
+  else if (minutes === 1) text = 'About a minute left in this step';
+  syncEta.textContent = text;
+  syncEta.classList.remove('hidden');
+}
+
+async function handleSkipMutuals() {
+  if (!state.user) return;
+  skipMutualsBtn.disabled = true;
+  try {
+    await syncCache.set(state.user.did, { skipMutuals: true });
+    etaSample = null; // the rate is about to change
+    updateSyncProgressUI(await syncCache.get(state.user.did));
+  } finally {
+    skipMutualsBtn.disabled = false;
+  }
 }
 
 function formatRelativeDate(dateStr) {
@@ -1677,6 +1749,14 @@ function renderHoverCardHTML(item, isHydrating = false) {
         </div>
       </div>
     `;
+  } else if (item.criteria?.mutualsCount === undefined) {
+    const status = isHydrating ? 'Loading common followers...' : 'Not checked yet';
+    mutualsHTML = `
+      <div class="hover-card-section">
+        <div class="hover-card-section-label"><span>Common Followers</span></div>
+        <div class="hover-card-mutuals"><span>${status}</span></div>
+      </div>
+    `;
   } else {
     mutualsHTML = `
       <div class="hover-card-section">
@@ -1763,6 +1843,8 @@ function renderHoverCardHTML(item, isHydrating = false) {
 }
 
 function needsPreviewHydration(rawItem) {
+  // Mutuals are unknown when the user skipped that part of the sync.
+  if (rawItem.criteria && rawItem.criteria.mutualsCount === undefined) return true;
   return (
     rawItem.description === undefined &&
     (!rawItem.preview ||

@@ -72,18 +72,39 @@
       <section id="sync-section" class="card hidden">
         <h2>Analyzing Followings</h2>
         <p class="description">
-          Retrieving profile statistics and analyzing recent activity. This may take a minute
-          depending on the number of follows.
+          ByeSky works at a gentle pace so your other Bluesky apps keep working while it runs. Large
+          follow lists can take 10 minutes or more, and you can keep this tab in the background.
         </p>
 
+        <h3 id="sync-step-title" class="sync-step-title" aria-live="polite">Starting sync…</h3>
+
         <div class="progress-container">
-          <div class="progress-bar-track">
+          <div
+            class="progress-bar-track"
+            role="progressbar"
+            aria-labelledby="sync-step-title"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+            id="sync-progress-track"
+          >
             <div id="sync-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
           </div>
           <div class="progress-stats">
             <span id="sync-stage">Starting sync...</span>
             <span id="sync-percent">0%</span>
           </div>
+          <p id="sync-eta" class="sync-eta hidden"></p>
+        </div>
+
+        <div id="skip-mutuals" class="skip-mutuals hidden">
+          <p>
+            Looking up mutual followers roughly doubles how long this step takes. Skip it and
+            they'll load when you preview an account instead.
+          </p>
+          <button id="skip-mutuals-btn" type="button" class="btn btn-secondary">
+            Skip mutual followers
+          </button>
         </div>
 
         <div id="sync-error" class="error-msg hidden"></div>

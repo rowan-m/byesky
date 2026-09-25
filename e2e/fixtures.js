@@ -46,11 +46,12 @@ function makeFollowings(count = 40) {
   }));
 }
 
-const fakeAuthModule = (followings, grantedScope) => `
+const fakeAuthModule = (followings, grantedScope, syncState) => `
 import { syncCache } from '/src/cache.js';
 const USER_DID = ${JSON.stringify(USER_DID)};
 const followings = ${JSON.stringify(followings)};
 const grantedScope = ${JSON.stringify(grantedScope)};
+const syncState = ${JSON.stringify(syncState || null)};
 export function initOAuthClient() {
   return {
     async init() {
@@ -60,6 +61,7 @@ export function initOAuthClient() {
         progress: { total: followings.length, processed: followings.length, currentStage: 'Done' },
         followings,
         lockedDids: [],
+        ...syncState,
       });
       return {
         session: {
@@ -99,14 +101,17 @@ export async function fetchAccountPreview(agent, userDid, targetDid) {
 `;
 
 /** Serves fake auth/API modules so the dashboard renders with fixture data. */
-export async function mockSignedInApp(page, { count = 40, grantedScope = OAUTH_SCOPE } = {}) {
+export async function mockSignedInApp(
+  page,
+  { count = 40, grantedScope = OAUTH_SCOPE, syncState = null } = {},
+) {
   const followings = makeFollowings(count);
   await page.route(
     (url) => url.pathname === '/src/auth.js',
     (route) =>
       route.fulfill({
         contentType: 'text/javascript',
-        body: fakeAuthModule(followings, grantedScope),
+        body: fakeAuthModule(followings, grantedScope, syncState),
       }),
   );
   await page.route(
