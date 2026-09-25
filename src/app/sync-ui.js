@@ -126,7 +126,7 @@ export async function loadFollowings() {
     authSection.classList.add('hidden');
     syncSection.classList.add('hidden');
     dashboardSection.classList.remove('hidden');
-    renderDashboard();
+    renderDashboard(true);
   } catch (err) {
     console.error('Load followings error:', err);
   }

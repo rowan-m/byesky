@@ -73,7 +73,7 @@ test('Scoring & Sanitization Helpers', async (t) => {
     assert.strictEqual(sanitizeUrl('http://example.com/a.png', 'fallback'), 'fallback');
     assert.strictEqual(
       truncateText('VeryLongDisplayName', 10),
-      '<abbr title="VeryLongDisplayName" style="text-decoration: none; cursor: help; border-bottom: none;">VeryLon...</abbr>',
+      '<abbr class="truncated-text" title="VeryLongDisplayName">VeryLon...</abbr>',
     );
   });
 

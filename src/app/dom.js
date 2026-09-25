@@ -23,6 +23,7 @@ export const syncElsewhere = document.getElementById('sync-elsewhere');
 export const cancelSyncBtn = document.getElementById('cancel-sync-btn');
 export const retrySyncBtn = document.getElementById('retry-sync-btn');
 
+export const actionToast = document.getElementById('action-toast');
 export const tableBody = document.getElementById('table-body');
 export const tableSearch = document.getElementById('table-search');
 export const selectAllCheckbox = document.getElementById('select-all');

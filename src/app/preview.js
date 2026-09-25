@@ -1,6 +1,6 @@
 import { escapeHTML, sanitizeUrl } from '../scoring.js';
 import { hoverCard } from './dom.js';
-import { formatMutualsCount, formatRelativeDate } from './format.js';
+import { formatCount, formatMutualsCount, formatRelativeDate } from './format.js';
 import { atprotoApi, state } from './state.js';
 
 let hoverShowTimeout = null;
@@ -111,9 +111,9 @@ function renderHoverCardHTML(item, isHydrating = false) {
     ? '<span class="badge badge-success">FOLLOWS YOU</span>'
     : '<span class="badge badge-secondary">DOES NOT FOLLOW</span>';
 
-  const followersStr = (item.criteria?.followersCount || 0).toLocaleString();
-  const followsStr = (item.criteria?.followsCount || 0).toLocaleString();
-  const postsStr = (item.criteria?.postsCount || 0).toLocaleString();
+  const followersStr = formatCount(item.criteria?.followersCount ?? 0);
+  const followsStr = formatCount(item.criteria?.followsCount ?? 0);
+  const postsStr = formatCount(item.criteria?.postsCount ?? 0);
 
   // 1. Bio section
   let bioHTML;
@@ -239,7 +239,7 @@ function renderHoverCardHTML(item, isHydrating = false) {
 
   return `
     <div class="hover-card-header">
-      <img class="hover-card-avatar" src="${avatarSrc}" alt="${safeHandle}">
+      <img class="hover-card-avatar" src="${avatarSrc}" alt="" width="38" height="38">
       <div class="hover-card-identity">
         <div class="hover-card-name-row">
           <a href="${profileUrl}" target="_blank" rel="noopener noreferrer" class="hover-card-name">${safeName}</a>

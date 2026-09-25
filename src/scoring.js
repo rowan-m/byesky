@@ -67,7 +67,7 @@ export function truncateText(text, maxLength) {
   if (!text) return '';
   if (text.length <= maxLength) return escapeHTML(text);
   const truncated = text.substring(0, maxLength - 3) + '...';
-  return `<abbr title="${escapeHTML(text)}" style="text-decoration: none; cursor: help; border-bottom: none;">${escapeHTML(truncated)}</abbr>`;
+  return `<abbr class="truncated-text" title="${escapeHTML(text)}">${escapeHTML(truncated)}</abbr>`;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;

@@ -24,6 +24,20 @@ import { formatCount, formatMutualsCount, formatRelativeDate } from './format.js
 import { attachRowPreview } from './preview.js';
 import { state } from './state.js';
 
+const FOCUSABLE_ROW_SELECTORS = [
+  '.row-checkbox',
+  '.lock-toggle-btn',
+  '.preview-btn',
+  '.unfollow-single-btn',
+  '.refollow-single-btn',
+  '.profile-link',
+];
+
+function scrollToTop() {
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+}
+
 export function setupTableListeners() {
   // Search input with basic debounce
   let searchTimeout;
@@ -39,7 +53,7 @@ export function setupTableListeners() {
   // Select All checkbox
   selectAllCheckbox.addEventListener('change', handleSelectAllToggle);
 
-  // Table header sorting
+  // Table header sorting (clicking the <button class="sort-btn"> bubbles to <th class="sortable">)
   document.querySelectorAll('.sortable').forEach((th) => {
     th.addEventListener('click', () => {
       const sortCol = th.dataset.sort;
@@ -58,8 +72,8 @@ export function setupTableListeners() {
     btn.addEventListener('click', () => {
       if (state.pagination.currentPage > 1) {
         state.pagination.currentPage--;
-        renderDashboard(false); // don't reset selection
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        renderDashboard(false);
+        scrollToTop();
       }
     });
   });
@@ -69,8 +83,8 @@ export function setupTableListeners() {
       const totalPages = Math.ceil(getFilteredAndSortedList().length / state.pagination.pageSize);
       if (state.pagination.currentPage < totalPages) {
         state.pagination.currentPage++;
-        renderDashboard(false); // don't reset selection
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        renderDashboard(false);
+        scrollToTop();
       }
     });
   });
@@ -78,6 +92,12 @@ export function setupTableListeners() {
 
 export function getFilteredAndSortedList() {
   return filterAndSortFollowings(state.followings, state);
+}
+
+export function getCurrentPageItems(list = getFilteredAndSortedList()) {
+  const startIdx = (state.pagination.currentPage - 1) * state.pagination.pageSize;
+  const endIdx = Math.min(startIdx + state.pagination.pageSize, list.length);
+  return list.slice(startIdx, endIdx);
 }
 
 function badge(kind, title, label) {
@@ -142,7 +162,35 @@ function renderCriteriaBadges(item) {
   return out.join('');
 }
 
-export function renderDashboard(resetSelection = true) {
+function captureFocusedRowControl() {
+  const active = document.activeElement;
+  if (!active || !tableBody.contains(active)) return null;
+  const rowEl = active.closest('tr[data-did]');
+  const did = active.dataset?.did || rowEl?.dataset?.did;
+  const selector = FOCUSABLE_ROW_SELECTORS.find((s) => active.matches(s));
+  return did && selector ? { did, selector } : null;
+}
+
+function restoreFocusedRowControl(focused) {
+  if (!focused) return;
+  const rows = tableBody.querySelectorAll('tr[data-did]');
+  let targetRow = null;
+  for (const tr of rows) {
+    if (tr.dataset.did === focused.did) {
+      targetRow = tr;
+      break;
+    }
+  }
+  if (!targetRow) return;
+  const el =
+    targetRow.querySelector(focused.selector) ||
+    targetRow.querySelector('.unfollow-single-btn, .refollow-single-btn');
+  if (el && !el.disabled) {
+    el.focus({ preventScroll: true });
+  }
+}
+
+export function renderDashboard(resetSelection = false) {
   if (resetSelection) {
     state.selectedDids.clear();
     selectAllCheckbox.checked = false;
@@ -150,6 +198,20 @@ export function renderDashboard(resetSelection = true) {
 
   const list = getFilteredAndSortedList();
   const totalCount = list.length;
+
+  // Keep selections across weight/param/sort edits, but drop any accounts that are no
+  // longer visible or selectable (e.g. hidden by a filter or search, locked, or unfollowed).
+  if (state.selectedDids.size > 0) {
+    const visibleSelectable = new Set();
+    for (const item of list) {
+      if (item.followingUri && !state.lockedDids.has(item.did)) {
+        visibleSelectable.add(item.did);
+      }
+    }
+    for (const did of state.selectedDids) {
+      if (!visibleSelectable.has(did)) state.selectedDids.delete(did);
+    }
+  }
 
   // Handle pagination clamp
   const totalPages = Math.ceil(totalCount / state.pagination.pageSize) || 1;
@@ -161,6 +223,8 @@ export function renderDashboard(resetSelection = true) {
   const endIdx = Math.min(startIdx + state.pagination.pageSize, totalCount);
   const pageItems = list.slice(startIdx, endIdx);
 
+  const focusedTarget = captureFocusedRowControl();
+
   // Render Table rows
   tableBody.innerHTML = '';
 
@@ -170,7 +234,7 @@ export function renderDashboard(resetSelection = true) {
     emptyState.classList.add('hidden');
     pageItems.forEach((item) => {
       const row = document.createElement('tr');
-      row.className = state.selectedDids.has(item.did) ? 'selected-row' : '';
+      row.dataset.did = item.did;
 
       let badgesHTML = renderCriteriaBadges(item);
 
@@ -235,7 +299,7 @@ export function renderDashboard(resetSelection = true) {
 
         const safeLinkUrl = sanitizeUrl(interactionInfo?.link, '');
         if (safeLinkUrl) {
-          cellContentHTML = `<a href="${safeLinkUrl}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline; text-underline-offset: 2px;" title="View last ${safeType} on Bluesky">${relativeDateStr}${typeLabel}</a>`;
+          cellContentHTML = `<a href="${safeLinkUrl}" target="_blank" rel="noopener noreferrer" class="interaction-link" title="View last ${safeType} on Bluesky">${relativeDateStr}${typeLabel}</a>`;
         } else {
           cellContentHTML = `${relativeDateStr}${typeLabel}`;
         }
@@ -246,8 +310,7 @@ export function renderDashboard(resetSelection = true) {
 
       let checkboxHTML;
       if (isUnfollowed) {
-        checkboxHTML =
-          '<span class="text-muted text-center" style="display: block; opacity: 0.5;">—</span>';
+        checkboxHTML = '<span class="text-muted text-center unfollowed-dash">—</span>';
       } else {
         const checkedAttr = !isLocked && state.selectedDids.has(item.did) ? 'checked' : '';
         const disabledAttr = isLocked ? 'disabled' : '';
@@ -280,9 +343,9 @@ export function renderDashboard(resetSelection = true) {
           ${checkboxHTML}
         </td>
         <td class="col-profile">
-          <div class="profile-cell" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">
+          <div class="profile-cell">
             <a href="https://bsky.app/profile/${encodeURIComponent(item.handle)}" target="_blank" rel="noopener noreferrer" class="profile-link">
-              <img class="avatar" src="${avatarSrc}" alt="${safeHandle}" loading="lazy">
+              <img class="avatar" src="${avatarSrc}" alt="" width="26" height="26" loading="lazy">
               <div class="profile-info">
                 <span class="display-name">${displayNameHTML}</span>
                 <span class="handle">${handleHTML}</span>
@@ -291,13 +354,13 @@ export function renderDashboard(resetSelection = true) {
             <button type="button" class="preview-btn" aria-label="Preview @${safeHandle}" aria-haspopup="dialog">ⓘ</button>
           </div>
         </td>
-        <td class="col-meta col-followers ${isLowFollowers ? 'criteria-highlight' : ''}" data-label="Followers" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(formatCount(item.criteria.followersCount))}</td>
-        <td class="col-meta col-last-post ${isPostInactive ? 'criteria-highlight' : ''}" data-label="Last post" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(formatRelativeDate(item.criteria.lastPostDate))}</td>
-        <td class="col-meta col-last-interaction ${isInteractionInactive ? 'criteria-highlight' : ''}" data-label="Last interaction" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${cellContentHTML}</td>
-        <td class="col-flags" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">
+        <td class="col-meta col-followers ${isLowFollowers ? 'criteria-highlight' : ''}" data-label="Followers">${escapeHTML(formatCount(item.criteria.followersCount))}</td>
+        <td class="col-meta col-last-post ${isPostInactive ? 'criteria-highlight' : ''}" data-label="Last post">${escapeHTML(formatRelativeDate(item.criteria.lastPostDate))}</td>
+        <td class="col-meta col-last-interaction ${isInteractionInactive ? 'criteria-highlight' : ''}" data-label="Last interaction">${cellContentHTML}</td>
+        <td class="col-flags">
           <div class="flags-list">${isUnfollowed ? '<span class="badge badge-secondary">Unfollowed</span>' : badgesHTML}</div>
         </td>
-        <td class="col-score score-cell ${scoreClass}" style="${isUnfollowed ? 'opacity: 0.5;' : ''}">${escapeHTML(item.score)}</td>
+        <td class="col-score score-cell ${scoreClass}">${escapeHTML(item.score)}</td>
         <td class="col-action text-right">
           ${actionButtonHTML}
         </td>
@@ -333,6 +396,7 @@ export function renderDashboard(resetSelection = true) {
           } else {
             state.selectedDids.delete(item.did);
           }
+          row.classList.toggle('selected-row', e.target.checked);
           updateSelectedCounter();
           renderCheckboxHeaders(pageItems);
         });
@@ -349,12 +413,18 @@ export function renderDashboard(resetSelection = true) {
     });
   }
 
-  // Render sorting indicators on headers
+  restoreFocusedRowControl(focusedTarget);
+
+  // Render sorting indicators and aria-sort on headers
   document.querySelectorAll('.sortable').forEach((th) => {
     th.classList.remove('sort-asc', 'sort-desc');
     const sortCol = th.dataset.sort;
     if (state.sorting.col === sortCol) {
-      th.classList.add(state.sorting.order === 'asc' ? 'sort-asc' : 'sort-desc');
+      const isAsc = state.sorting.order === 'asc';
+      th.classList.add(isAsc ? 'sort-asc' : 'sort-desc');
+      th.setAttribute('aria-sort', isAsc ? 'ascending' : 'descending');
+    } else {
+      th.setAttribute('aria-sort', 'none');
     }
   });
 
@@ -379,12 +449,16 @@ export function renderDashboard(resetSelection = true) {
 
     for (let i = startPage; i <= endPage; i++) {
       const pageBtn = document.createElement('button');
+      pageBtn.type = 'button';
       pageBtn.className = `page-link ${state.pagination.currentPage === i ? 'active' : ''}`;
       pageBtn.textContent = i;
+      if (state.pagination.currentPage === i) {
+        pageBtn.setAttribute('aria-current', 'page');
+      }
       pageBtn.addEventListener('click', () => {
         state.pagination.currentPage = i;
         renderDashboard(false);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        scrollToTop();
       });
       container.appendChild(pageBtn);
     }
@@ -417,12 +491,9 @@ export function renderCheckboxHeaders(pageItems) {
 }
 
 function handleSelectAllToggle(e) {
-  const list = getFilteredAndSortedList();
-  const startIdx = (state.pagination.currentPage - 1) * state.pagination.pageSize;
-  const endIdx = Math.min(startIdx + state.pagination.pageSize, list.length);
-  const selectableItems = list
-    .slice(startIdx, endIdx)
-    .filter((item) => Boolean(item.followingUri) && !state.lockedDids.has(item.did));
+  const selectableItems = getCurrentPageItems().filter(
+    (item) => Boolean(item.followingUri) && !state.lockedDids.has(item.did),
+  );
 
   if (e.target.checked) {
     selectableItems.forEach((item) => state.selectedDids.add(item.did));

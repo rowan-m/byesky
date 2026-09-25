@@ -90,8 +90,14 @@ export function createViewerAgent() {
 }
 export function startBackgroundSync() { (window.__syncStarts ||= 0); window.__syncStarts++; return Promise.resolve(); }
 export function cancelSync() { window.__syncCancels = (window.__syncCancels || 0) + 1; }
-export async function batchUnfollow() { return {}; }
-export async function followUser() { return {}; }
+export async function batchUnfollow(agent, userDid, dids) {
+  if (window.__batchUnfollow) return window.__batchUnfollow(dids);
+  return { success: dids, failed: [] };
+}
+export async function followUser(agent, userDid, targetDid) {
+  if (window.__followUser) return window.__followUser(targetDid);
+  return { did: targetDid, followingUri: 'at://' + userDid + '/app.bsky.graph.follow/restored' };
+}
 export async function fetchAccountPreview(agent, userDid, targetDid) {
   const n = targetDid.replace('did:plc:acct', '');
   return {
