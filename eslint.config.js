@@ -29,6 +29,7 @@ export default [
         alert: 'readonly',
         AbortController: 'readonly',
         DOMException: 'readonly',
+        requestAnimationFrame: 'readonly',
         Headers: 'readonly',
         // Node globals
         process: 'readonly',

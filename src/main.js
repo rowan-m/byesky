@@ -102,6 +102,7 @@ const syncProgressTrack = document.getElementById('sync-progress-track');
 const syncEta = document.getElementById('sync-eta');
 const skipMutualsPanel = document.getElementById('skip-mutuals');
 const skipMutualsBtn = document.getElementById('skip-mutuals-btn');
+const syncElsewhere = document.getElementById('sync-elsewhere');
 const cancelSyncBtn = document.getElementById('cancel-sync-btn');
 const retrySyncBtn = document.getElementById('retry-sync-btn');
 
@@ -841,6 +842,7 @@ async function handleLogin(e) {
 }
 
 async function handleLogout() {
+  if (state.user) atprotoApi?.cancelSync?.(state.user.did);
   if (state.user && state.session) {
     try {
       await state.session.signOut();
@@ -871,11 +873,7 @@ async function checkSyncStatus() {
     state.sync = cachedState;
     state.lockedDids = new Set(await syncCache.getLockedDids(state.user.did));
 
-    if (cachedState.lastUpdated) {
-      lastSyncedTime.textContent = formatLastSynced(cachedState.lastUpdated);
-    } else {
-      lastSyncedTime.textContent = '';
-    }
+    renderLastSynced(cachedState);
 
     if (cachedState.status === 'idle') {
       await triggerSync();
@@ -900,51 +898,38 @@ async function triggerSync() {
   if (!state.user) return;
   state.selectedDids.clear();
   selectAllCheckbox.checked = false;
+  etaSample = null;
 
-  try {
-    // 1. Signal cancellation to any currently running background sync thread
-    await syncCache.set(state.user.did, {
-      status: 'cancelled',
-      error: null,
-    });
-
-    // 2. Wait 300ms for active workers to detect cancellation and shut down gracefully
-    await new Promise((r) => setTimeout(r, 300));
-
-    // 3. Initialize fresh sync state
-    await syncCache.set(state.user.did, {
-      status: 'idle',
-      error: null,
-    });
-
-    // Instantly check status & start background execution
-    const cachedState = await syncCache.get(state.user.did);
-    showSyncSection(cachedState);
-    atprotoApi.startBackgroundSync(state.agent, state.user.did, onSyncUpdate);
-  } catch (err) {
-    console.error('Trigger sync error:', err);
-  }
+  // Replaces (and waits for) any run already going in this tab; see startBackgroundSync.
+  atprotoApi.startBackgroundSync(state.agent, state.user.did, onSyncUpdate);
+  showSyncSection({ status: 'fetching', progress: {} });
 }
 
 /**
  * Event-driven callback executed by atproto.js background sync loops.
  * Avoids browser CPU polling loops.
  */
-async function onSyncUpdate() {
+let syncUpdateFrame = null;
+
+function onSyncUpdate() {
+  // Syncs report progress many times a second. Render at most once per frame, and not at
+  // all while the tab is in the background (frames don't fire), catching up on return.
+  if (syncUpdateFrame !== null) return;
+  syncUpdateFrame = requestAnimationFrame(() => {
+    syncUpdateFrame = null;
+    applySyncUpdate();
+  });
+}
+
+async function applySyncUpdate() {
   if (!state.user) return;
+  const did = state.user.did;
 
   try {
-    const cachedState = await syncCache.get(state.user.did);
+    const cachedState = await syncCache.get(did);
+    if (!state.user || state.user.did !== did) return; // signed out meanwhile
     state.sync = cachedState;
-    state.lockedDids = new Set(await syncCache.getLockedDids(state.user.did));
-
-    if (cachedState.lastUpdated) {
-      lastSyncedTime.textContent = formatLastSynced(cachedState.lastUpdated);
-    } else {
-      lastSyncedTime.textContent = '';
-    }
-
-    updateSyncProgressUI(cachedState);
+    renderLastSynced(cachedState);
 
     if (cachedState.status === 'completed') {
       await loadFollowings();
@@ -952,10 +937,8 @@ async function onSyncUpdate() {
       showSyncCancelled(cachedState.error || 'Sync cancelled by user.');
     } else if (cachedState.status === 'error') {
       showSyncError(cachedState.error);
-    } else if (cachedState.status === 'enriching') {
-      // Progressively refresh the dashboard list incrementally as data enriches
-      state.followings = cachedState.followings || [];
-      renderDashboard(false);
+    } else {
+      updateSyncProgressUI(cachedState);
     }
   } catch (err) {
     console.warn('Sync update handling error:', err);
@@ -1599,10 +1582,12 @@ async function handleCancelSync() {
   cancelSyncBtn.disabled = true;
   cancelSyncBtn.textContent = 'Cancelling...';
   try {
+    atprotoApi.cancelSync(state.user.did);
     await syncCache.set(state.user.did, {
       status: 'cancelled',
       error: 'Synchronization aborted by user.',
     });
+    await syncCache.flush(state.user.did);
     showSyncCancelled('Synchronization aborted by user.');
   } catch (err) {
     console.error('Cancel sync error:', err);
@@ -1632,7 +1617,7 @@ function updateSyncProgressUI(syncState) {
     const count = document.createElement('span');
     count.className = 'sync-step-count';
     count.textContent = `Step ${step.index} of ${step.total}:`;
-    syncStepTitle.replaceChildren(count, label);
+    syncStepTitle.replaceChildren(count, ' ', label);
   } else {
     syncStepTitle.textContent = 'Starting sync…';
   }
@@ -1652,8 +1637,13 @@ function updateSyncProgressUI(syncState) {
     step ? `Step ${step.index} of ${step.total}, ${percent}%` : `${percent}%`,
   );
 
+  // Another tab is running this sync; this tab only mirrors it, so it can't skip or cancel.
+  const elsewhere = Boolean(syncState.runningElsewhere);
+  syncElsewhere?.classList.toggle('hidden', !elsewhere);
+  cancelSyncBtn.classList.toggle('hidden', elsewhere);
+
   const inActivityStep = step?.id === 'activity' && syncState.status === 'enriching';
-  skipMutualsPanel?.classList.toggle('hidden', !inActivityStep || skipped);
+  skipMutualsPanel?.classList.toggle('hidden', !inActivityStep || skipped || elsewhere);
   updateSyncEta(step, progress);
 }
 
@@ -1713,6 +1703,13 @@ function formatRelativeDate(dateStr) {
 
   const date = new Date(dateStr);
   return date.toLocaleDateString(undefined, { year: '2-digit', month: 'short', day: 'numeric' });
+}
+
+// "Last synced" is when a sync last finished. Entries from before completedAt existed fall
+// back to their last write, which is only meaningful once the sync completed.
+function renderLastSynced(entry) {
+  const at = entry.completedAt ?? (entry.status === 'completed' ? entry.lastUpdated : null);
+  lastSyncedTime.textContent = at ? formatLastSynced(at) : '';
 }
 
 function formatLastSynced(timestamp) {

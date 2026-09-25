@@ -96,26 +96,96 @@ function syncStep(id) {
   return { id, index: index + 1, total: SYNC_STEPS.length, label: SYNC_STEPS[index].label };
 }
 
+const LOCK_PREFIX = 'byesky-sync:';
+const OTHER_TAB_POLL_MS = 2000;
+
+// The run in progress in this tab, per account: { controller, promise }.
+const activeRuns = new Map();
+
+export function isCancel(err) {
+  return err?.name === 'AbortError' || err?.message === 'Sync cancelled';
+}
+
+/** Stops this tab's sync for the account, if one is running. */
+export function cancelSync(userDid) {
+  activeRuns.get(userDid)?.controller.abort(new DOMException('Sync cancelled', 'AbortError'));
+}
+
 /**
- * Initiates the progressive sync and scoring process.
- * Runs asynchronously in the browser.
+ * Starts a sync for the account, replacing any run already going in this tab. A Web Lock
+ * makes sure only one tab syncs an account at a time: if another tab holds it, this tab
+ * follows that tab's progress from IndexedDB instead, and takes over if that tab goes away.
  */
 export function startBackgroundSync(agent, userDid, onUpdate) {
-  runSync(agent, userDid, onUpdate).catch(async (err) => {
-    // If it was gracefully aborted due to cancellation, do not set error state
-    const cached = await syncCache.get(userDid);
-    if (cached.status === 'cancelled') {
-      console.log(`Sync background thread gracefully aborted due to cancellation for ${userDid}`);
-      return;
-    }
+  const previous = activeRuns.get(userDid);
+  const controller = new AbortController();
+  const { signal } = controller;
 
-    console.error('Fatal sync error:', err);
-    await syncCache.set(userDid, {
-      status: 'error',
-      error: err.message || 'An unexpected error occurred during analysis.',
+  const promise = (async () => {
+    if (previous) {
+      previous.controller.abort(new DOMException('Sync cancelled', 'AbortError'));
+      await previous.promise.catch(() => {});
+    }
+    while (!signal.aborted) {
+      const ran = await withSyncLock(userDid, () => runSync(agent, userDid, onUpdate, signal));
+      if (ran) return;
+      const stillRunning = await followOtherTab(userDid, onUpdate, signal);
+      if (!stillRunning) return; // the other tab finished; its result is now loaded
+    }
+  })()
+    .catch(async (err) => {
+      if (isCancel(err)) return;
+      console.error('Fatal sync error:', err);
+      await syncCache.set(userDid, {
+        status: 'error',
+        error: err.message || 'An unexpected error occurred during analysis.',
+      });
+      await syncCache.flush(userDid);
+      if (onUpdate) onUpdate();
+    })
+    .finally(() => {
+      if (activeRuns.get(userDid)?.controller === controller) activeRuns.delete(userDid);
     });
-    if (onUpdate) onUpdate();
+
+  activeRuns.set(userDid, { controller, promise });
+  return promise;
+}
+
+/** Runs `fn` holding the account's sync lock. Returns false if another tab holds it. */
+async function withSyncLock(userDid, fn) {
+  if (typeof navigator === 'undefined' || !navigator.locks) {
+    await fn();
+    return true;
+  }
+  return navigator.locks.request(LOCK_PREFIX + userDid, { ifAvailable: true }, async (lock) => {
+    if (!lock) return false;
+    await fn();
+    return true;
   });
+}
+
+/**
+ * Mirrors another tab's sync from IndexedDB until it finishes. Returns true if that tab went
+ * away mid-sync (its lock was released without finishing), so this tab should take over.
+ */
+async function followOtherTab(userDid, onUpdate, signal) {
+  for (;;) {
+    const entry = await syncCache.reload(userDid);
+    if (signal.aborted) return false;
+    if (entry.status !== 'fetching' && entry.status !== 'enriching') {
+      if (onUpdate) onUpdate();
+      return false;
+    }
+    syncCache.setLocal(userDid, { runningElsewhere: true });
+    if (onUpdate) onUpdate();
+    const lockFree = await navigator.locks.request(
+      LOCK_PREFIX + userDid,
+      { ifAvailable: true },
+      (lock) => !!lock,
+    );
+    if (lockFree) return true;
+    await new Promise((resolve) => setTimeout(resolve, OTHER_TAB_POLL_MS));
+  }
 }
 
 /**
@@ -123,17 +193,12 @@ export function startBackgroundSync(agent, userDid, onUpdate) {
  * server and network errors with backoff. Retry pauses are surfaced in the sync progress so
  * the user knows why things slowed down.
  */
-async function fetchWithBackoff(userDid, apiCallFn, onUpdate, limiter) {
-  // Check for user-driven cancellation before making the request
-  const cached = await syncCache.get(userDid);
-  if (cached.status === 'cancelled') {
-    throw new Error('Sync cancelled');
-  }
-
+async function fetchWithBackoff(userDid, apiCallFn, onUpdate, limiter, signal) {
   return withRetry(apiCallFn, {
     limiter,
+    signal,
     onWait: ({ ms, reason }) => {
-      if (reason === 'error') return;
+      if (reason === 'error' || signal?.aborted) return;
       const seconds = Math.max(1, Math.round(ms / 1000));
       console.warn(`Bluesky is rate limiting requests (${reason}). Pausing ${seconds}s.`);
       syncCache
@@ -154,13 +219,25 @@ async function fetchWithBackoff(userDid, apiCallFn, onUpdate, limiter) {
  * and analyzes last post and last like history using concurrent workers.
  * Uses the native Agent in the browser.
  */
-async function runSync(agent, userDid, onUpdate) {
+async function runSync(agent, userDid, onUpdate, signal) {
   // Viewer-context AppView reads go through the user's PDS; bulk public reads (author feeds)
   // go straight to the public AppView. See createViewerAgent / createPublicAgent.
   const viewerAgent = createViewerAgent(agent);
   const publicAgent = createPublicAgent();
 
-  const syncSessionId = Math.random().toString(36).substring(2, 10);
+  // Every write checks the signal first, so a replaced or cancelled run can't overwrite the
+  // state of the run that replaced it.
+  const checkAborted = () => {
+    if (signal.aborted) throw signal.reason ?? new DOMException('Sync cancelled', 'AbortError');
+  };
+  const save = async (data) => {
+    checkAborted();
+    return syncCache.set(userDid, data);
+  };
+  const progress = async (...args) => {
+    checkAborted();
+    return syncCache.updateProgress(userDid, ...args);
+  };
 
   // Outbound scan to compile whom YOU have interacted with (replies, reposts, likes, messages)
   const userOutboundInteractions = new Set();
@@ -177,16 +254,16 @@ async function runSync(agent, userDid, onUpdate) {
   }
 
   // Set initial loading state
-  await syncCache.set(userDid, {
+  await save({
     status: 'fetching',
-    syncSessionId: syncSessionId,
+    runningElsewhere: false,
     error: null,
     followings: [],
     skipMutuals: false,
     mutualsSkipped: false,
     lastUpdated: Date.now(),
   });
-  await syncCache.updateProgress(userDid, 0, 0, 'Retrieving follows list from Bluesky...', {
+  await progress(0, 0, 'Retrieving follows list from Bluesky...', {
     step: syncStep('follows'),
   });
   if (onUpdate) onUpdate();
@@ -205,25 +282,20 @@ async function runSync(agent, userDid, onUpdate) {
           }),
         onUpdate,
         limiters.pds,
+        signal,
       );
 
-      const check = await syncCache.get(userDid);
-      if (check.syncSessionId !== syncSessionId) return;
+      checkAborted();
 
       follows = follows.concat(response.data.follows || []);
       cursor = response.data.cursor;
-      await syncCache.updateProgress(
-        userDid,
-        follows.length,
-        0,
-        `Retrieved ${follows.length} followings...`,
-      );
+      await progress(follows.length, 0, `Retrieved ${follows.length} followings...`);
       if (onUpdate) onUpdate();
     } while (cursor);
   } catch (err) {
-    if (err.message === 'Sync cancelled') return;
+    if (isCancel(err)) return;
     console.error('Error fetching follows:', err);
-    await syncCache.set(userDid, {
+    await save({
       status: 'error',
       error: 'Failed to retrieve follow list: ' + err.message,
     });
@@ -233,20 +305,19 @@ async function runSync(agent, userDid, onUpdate) {
 
   const totalFollows = follows.length;
   if (totalFollows === 0) {
-    await syncCache.set(userDid, {
+    await save({
       status: 'completed',
       followings: [],
     });
-    await syncCache.updateProgress(userDid, 0, 0, 'No followings found.');
+    await progress(0, 0, 'No followings found.');
     if (onUpdate) onUpdate();
     return;
   }
 
   // Double check cancellation
-  const cancelCheck1 = await syncCache.get(userDid);
-  if (cancelCheck1.status === 'cancelled') return;
+  checkAborted();
 
-  await syncCache.updateProgress(userDid, 0, totalFollows, 'Initializing follows list...');
+  await progress(0, totalFollows, 'Initializing follows list...');
   if (onUpdate) onUpdate();
 
   // Build basic following objects from graph follows
@@ -295,7 +366,7 @@ async function runSync(agent, userDid, onUpdate) {
     };
   });
 
-  await syncCache.set(userDid, {
+  await save({
     status: 'enriching',
     followings: followingsList,
   });
@@ -313,13 +384,9 @@ async function runSync(agent, userDid, onUpdate) {
     userInteractedWith: new Set(),
   };
 
-  await syncCache.updateProgress(
-    userDid,
-    0,
-    SCAN_LIMIT,
-    'Fetching interaction history (notifications & DMs)...',
-    { step: syncStep('notifications') },
-  );
+  await progress(0, SCAN_LIMIT, 'Fetching interaction history (notifications & DMs)...', {
+    step: syncStep('notifications'),
+  });
   if (onUpdate) onUpdate();
 
   try {
@@ -337,6 +404,7 @@ async function runSync(agent, userDid, onUpdate) {
           }),
         onUpdate,
         limiters.pds,
+        signal,
       );
 
       const notifsList = response.data.notifications || [];
@@ -370,8 +438,7 @@ async function runSync(agent, userDid, onUpdate) {
 
       // Update progress so user knows we are retrieving notification history pages
       const progressMessage = `Fetching interaction history (notifications ${fetchedCount}/${maxNotificationsToScan})...`;
-      await syncCache.updateProgress(
-        userDid,
+      await progress(
         Math.min(fetchedCount, maxNotificationsToScan),
         maxNotificationsToScan,
         progressMessage,
@@ -379,7 +446,7 @@ async function runSync(agent, userDid, onUpdate) {
       if (onUpdate) onUpdate();
     } while (cursor && fetchedCount < maxNotificationsToScan);
   } catch (err) {
-    if (err.message === 'Sync cancelled') return;
+    if (isCancel(err)) return;
     console.warn('Could not fetch notifications for interactions:', err);
     inboundFailed = true;
   }
@@ -396,6 +463,7 @@ async function runSync(agent, userDid, onUpdate) {
         () => chatAgent.chat.bsky.convo.listConvos({ limit: 100, cursor: convoCursor }),
         onUpdate,
         limiters.pds,
+        signal,
       );
       for (const convo of res.data.convos || []) {
         if (convo.status && convo.status !== 'accepted') continue;
@@ -420,18 +488,14 @@ async function runSync(agent, userDid, onUpdate) {
       pages++;
     } while (convoCursor && pages < MAX_CONVO_PAGES);
   } catch (err) {
-    if (err.message === 'Sync cancelled') return;
+    if (isCancel(err)) return;
     console.warn('Could not fetch chat conversations:', err);
     inboundFailed = true;
   }
 
-  await syncCache.updateProgress(
-    userDid,
-    0,
-    SCAN_LIMIT,
-    'Mapping your outbound feed interactions (replies & reposts)...',
-    { step: syncStep('ownPosts') },
-  );
+  await progress(0, SCAN_LIMIT, 'Mapping your outbound feed interactions (replies & reposts)...', {
+    step: syncStep('ownPosts'),
+  });
   if (onUpdate) onUpdate();
 
   // 1. Scan your own author feed (up to SCAN_LIMIT items)
@@ -451,6 +515,7 @@ async function runSync(agent, userDid, onUpdate) {
           }),
         onUpdate,
         limiters.appview,
+        signal,
       );
 
       const feedList = response.data.feed || [];
@@ -496,16 +561,11 @@ async function runSync(agent, userDid, onUpdate) {
       feedCursor = response.data.cursor;
 
       const progressMessage = `Mapping your outbound feed interactions (${feedFetched}/${maxFeedToScan})...`;
-      await syncCache.updateProgress(
-        userDid,
-        Math.min(feedFetched, maxFeedToScan),
-        maxFeedToScan,
-        progressMessage,
-      );
+      await progress(Math.min(feedFetched, maxFeedToScan), maxFeedToScan, progressMessage);
       if (onUpdate) onUpdate();
     } while (feedCursor && feedFetched < maxFeedToScan);
   } catch (err) {
-    if (err.message === 'Sync cancelled') return;
+    if (isCancel(err)) return;
     console.warn('Could not fetch outbound feed for interactions:', err);
     outboundFailed = true;
   }
@@ -516,7 +576,7 @@ async function runSync(agent, userDid, onUpdate) {
     let likesFetched = 0;
     const maxLikesToScan = SCAN_LIMIT;
 
-    await syncCache.updateProgress(userDid, 0, SCAN_LIMIT, 'Mapping your outbound liked posts...', {
+    await progress(0, SCAN_LIMIT, 'Mapping your outbound liked posts...', {
       step: syncStep('likes'),
     });
     if (onUpdate) onUpdate();
@@ -533,6 +593,7 @@ async function runSync(agent, userDid, onUpdate) {
           }),
         onUpdate,
         limiters.pds,
+        signal,
       );
 
       const records = response.data.records || [];
@@ -566,16 +627,11 @@ async function runSync(agent, userDid, onUpdate) {
       likesCursor = response.data.cursor;
 
       const progressMessage = `Mapping your outbound liked posts (${likesFetched}/${maxLikesToScan})...`;
-      await syncCache.updateProgress(
-        userDid,
-        Math.min(likesFetched, maxLikesToScan),
-        maxLikesToScan,
-        progressMessage,
-      );
+      await progress(Math.min(likesFetched, maxLikesToScan), maxLikesToScan, progressMessage);
       if (onUpdate) onUpdate();
     } while (likesCursor && likesFetched < maxLikesToScan);
   } catch (err) {
-    if (err.message === 'Sync cancelled') return;
+    if (isCancel(err)) return;
     console.warn('Could not fetch outbound likes for interactions:', err);
     outboundFailed = true;
   }
@@ -605,7 +661,7 @@ async function runSync(agent, userDid, onUpdate) {
   }
 
   // Store lists after setting interactions
-  await syncCache.set(userDid, {
+  await save({
     followings: followingsList,
     interactions: {
       likedBy: Array.from(interactions.likedBy),
@@ -619,25 +675,18 @@ async function runSync(agent, userDid, onUpdate) {
   if (onUpdate) onUpdate();
 
   // Enrich profiles with follower and post counts in batches of 25
-  await syncCache.updateProgress(userDid, 0, totalFollows, 'Fetching profile statistics...', {
+  await progress(0, totalFollows, 'Fetching profile statistics...', {
     step: syncStep('profiles'),
   });
   const batchSize = 25;
   for (let i = 0; i < followingsList.length; i += batchSize) {
     // Check for cancellation or newer session takeover
-    const cancelCheckLoop = await syncCache.get(userDid);
-    if (cancelCheckLoop.status === 'cancelled' || cancelCheckLoop.syncSessionId !== syncSessionId)
-      return;
+    checkAborted();
 
     const batch = followingsList.slice(i, i + batchSize);
     const batchDids = batch.map((b) => b.did);
 
-    await syncCache.updateProgress(
-      userDid,
-      i,
-      totalFollows,
-      `Fetching profile statistics (${i}/${totalFollows})...`,
-    );
+    await progress(i, totalFollows, `Fetching profile statistics (${i}/${totalFollows})...`);
     if (onUpdate) onUpdate();
 
     try {
@@ -646,6 +695,7 @@ async function runSync(agent, userDid, onUpdate) {
         () => viewerAgent.api.app.bsky.actor.getProfiles({ actors: batchDids }),
         onUpdate,
         limiters.pds,
+        signal,
       );
       if (profilesRes.data && profilesRes.data.profiles) {
         const profilesMap = new Map(profilesRes.data.profiles.map((p) => [p.did, p]));
@@ -672,24 +722,20 @@ async function runSync(agent, userDid, onUpdate) {
         }
       }
     } catch (err) {
-      if (err.message === 'Sync cancelled') return;
+      if (isCancel(err)) return;
       console.warn(`Error fetching profile stats batch starting at ${i}:`, err);
       for (const f of batch) f.criteria.unknown.push('profile');
     }
 
     // Save batch progress so client has current data
-    await syncCache.set(userDid, { followings: followingsList });
+    await save({ followings: followingsList });
     if (onUpdate) onUpdate();
   }
 
   // Analyze latest posts and latest likes using concurrent worker queue
-  await syncCache.updateProgress(
-    userDid,
-    0,
-    totalFollows,
-    'Analyzing activity (last posts and last likes)...',
-    { step: syncStep('activity') },
-  );
+  await progress(0, totalFollows, 'Analyzing activity (last posts and last likes)...', {
+    step: syncStep('activity'),
+  });
   if (onUpdate) onUpdate();
 
   // Pacing comes from the shared per-host limiters; a few workers keep the pipe full
@@ -701,10 +747,9 @@ async function runSync(agent, userDid, onUpdate) {
   async function worker() {
     while (activeIndex < followingsList.length) {
       // Check for user-driven cancellation or newer session takeover
-      const cachedCheck = await syncCache.get(userDid);
-      if (cachedCheck.status === 'cancelled' || cachedCheck.syncSessionId !== syncSessionId) {
-        throw new Error('Sync cancelled');
-      }
+      checkAborted();
+      // The user can choose to skip mutuals part way through, so re-read the flag each time.
+      const { skipMutuals } = await syncCache.get(userDid);
 
       const idx = activeIndex++;
       const f = followingsList[idx];
@@ -724,6 +769,7 @@ async function runSync(agent, userDid, onUpdate) {
             }),
           onUpdate,
           limiters.appview,
+          signal,
         );
         // Accounts that hide their posts from logged-out visitors return an empty feed
         // publicly, so ask again as the signed-in user before concluding they never posted.
@@ -733,6 +779,7 @@ async function runSync(agent, userDid, onUpdate) {
             () => viewerAgent.api.app.bsky.feed.getAuthorFeed({ actor: f.did, limit: 100 }),
             onUpdate,
             limiters.pds,
+            signal,
           );
         }
 
@@ -745,7 +792,7 @@ async function runSync(agent, userDid, onUpdate) {
           f.preview.lastPost = activity.lastPost;
         }
       } catch (err) {
-        if (err.message === 'Sync cancelled') throw err;
+        if (isCancel(err)) throw err;
         console.warn(`Could not fetch post activity for ${f.handle || f.did}:`, err.message || err);
         applyActorError(f, err);
       }
@@ -754,7 +801,7 @@ async function runSync(agent, userDid, onUpdate) {
 
       // 3. Get mutual follows count (Social Outlier check). The user can skip this to halve
       // the time the step takes; mutuals are then fetched on demand when previewing.
-      if (cachedCheck.skipMutuals) {
+      if (skipMutuals) {
         mutualsSkipped = true;
       } else {
         try {
@@ -767,6 +814,7 @@ async function runSync(agent, userDid, onUpdate) {
               }),
             onUpdate,
             limiters.pds,
+            signal,
           );
           const mutuals = mutualsRes.data.followers || [];
           f.criteria.mutualsCount = mutuals.length;
@@ -780,7 +828,7 @@ async function runSync(agent, userDid, onUpdate) {
             avatar: m.avatar || '',
           }));
         } catch (err) {
-          if (err.message === 'Sync cancelled') throw err;
+          if (isCancel(err)) throw err;
           console.warn(
             `Could not fetch mutual follows for ${f.handle || f.did}:`,
             err.message || err,
@@ -790,17 +838,15 @@ async function runSync(agent, userDid, onUpdate) {
 
       // Periodically update progress
       if (idx % 5 === 0 || idx === followingsList.length - 1) {
-        const curCached = await syncCache.get(userDid);
-        if (curCached.status !== 'cancelled') {
-          await syncCache.updateProgress(
-            userDid,
-            idx + 1,
-            totalFollows,
-            `Analyzing activity (${idx + 1}/${totalFollows})...`,
-            { followings: followingsList },
-          );
-          if (onUpdate) onUpdate();
-        }
+        await progress(
+          idx + 1,
+          totalFollows,
+          `Analyzing activity (${idx + 1}/${totalFollows})...`,
+          {
+            followings: followingsList,
+          },
+        );
+        if (onUpdate) onUpdate();
       }
     }
   }
@@ -809,29 +855,20 @@ async function runSync(agent, userDid, onUpdate) {
     const workers = Array.from({ length: concurrencyLimit }, () => worker());
     await Promise.all(workers);
   } catch (err) {
-    if (err.message === 'Sync cancelled') {
+    if (isCancel(err)) {
       console.log(`Sync abort requested and successfully executed for ${userDid}`);
       return;
     }
     throw err;
   }
 
-  // Double check cancellation before completing
-  const cancelCheckEnd = await syncCache.get(userDid);
-  if (cancelCheckEnd.status === 'cancelled') return;
-
-  // Completed sync
-  await syncCache.updateProgress(
-    userDid,
-    totalFollows,
-    totalFollows,
-    'Analysis completed successfully.',
-    {
-      status: 'completed',
-      followings: followingsList,
-      mutualsSkipped,
-    },
-  );
+  await progress(totalFollows, totalFollows, 'Analysis completed successfully.', {
+    status: 'completed',
+    completedAt: Date.now(), // "Last synced" is when a sync finished, not the last write
+    followings: followingsList,
+    mutualsSkipped,
+  });
+  await syncCache.flush(userDid);
   if (onUpdate) onUpdate();
 }
 

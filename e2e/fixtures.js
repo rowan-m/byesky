@@ -88,7 +88,8 @@ export function createAgent() {
 export function createViewerAgent() {
   return { app, api: { app } };
 }
-export function startBackgroundSync() {}
+export function startBackgroundSync() { (window.__syncStarts ||= 0); window.__syncStarts++; return Promise.resolve(); }
+export function cancelSync() { window.__syncCancels = (window.__syncCancels || 0) + 1; }
 export async function batchUnfollow() { return {}; }
 export async function followUser() { return {}; }
 export async function fetchAccountPreview(agent, userDid, targetDid) {

@@ -28,7 +28,7 @@ test.beforeEach(async ({ page }) => {
 
 test('shows which step of the whole sync is running', async ({ page }) => {
   await expect(page.locator('#sync-step-title')).toHaveText(
-    'Step 6 of 6:Checking recent activity and mutual followers',
+    'Step 6 of 6: Checking recent activity and mutual followers',
   );
   const track = page.locator('#sync-progress-track');
   await expect(track).toHaveAttribute('role', 'progressbar');
@@ -43,10 +43,27 @@ test('mutual followers lookup can be skipped during the activity step', async ({
   await page.locator('#skip-mutuals-btn').click();
 
   await expect(panel).toBeHidden();
-  await expect(page.locator('#sync-step-title')).toHaveText('Step 6 of 6:Checking recent activity');
+  await expect(page.locator('#sync-step-title')).toHaveText(
+    'Step 6 of 6: Checking recent activity',
+  );
   const skipFlag = await page.evaluate(async () => {
     const { syncCache } = await import('/src/cache.js');
     return (await syncCache.get('did:plc:e2euser')).skipMutuals;
   });
   expect(skipFlag).toBe(true);
+});
+
+test('cancelling stops the running sync and saves the cancelled state', async ({ page }) => {
+  await page.locator('#cancel-sync-btn').click();
+  await expect(page.locator('#sync-section')).toContainText('Sync Cancelled');
+  expect(await page.evaluate(() => window.__syncCancels)).toBe(1);
+  const status = await page.evaluate(async () => {
+    const { syncCache } = await import('/src/cache.js');
+    return (await syncCache.reload('did:plc:e2euser')).status;
+  });
+  expect(status).toBe('cancelled');
+});
+
+test('"Last synced" is blank while the first sync is still running', async ({ page }) => {
+  await expect(page.locator('#last-synced-time')).toHaveText('');
 });
