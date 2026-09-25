@@ -1,5 +1,7 @@
 // Pure scoring, filtering, sorting, and sanitization helpers for ByeSky.
 
+import { CRITERIA } from './criteria.js';
+
 export const SEVERE_LABELS = new Set([
   'spam',
   'impersonation',
@@ -145,25 +147,11 @@ function normaliseParams(params = {}) {
 }
 
 /**
- * The criteria, in the order they're shown. Each one evaluates to true (matches), false
- * (doesn't) or null (unknown, because the data behind it couldn't be fetched).
+ * The criteria, in the order their badges are shown (see criteria.js). Each one evaluates
+ * to true (matches), false (doesn't) or null (unknown, because the data behind it couldn't
+ * be fetched).
  */
-export const CRITERIA_IDS = [
-  'deletedBanned',
-  'blocking',
-  'neverPosted',
-  'inactive',
-  'notFollowing',
-  'noInbound',
-  'noOutbound',
-  'noisy',
-  'muted',
-  'massFollower',
-  'spammyRatio',
-  'flagged',
-  'outlier',
-  'lowFollowers',
-];
+export const CRITERIA_IDS = CRITERIA.map(({ id }) => id);
 
 /**
  * Data sources a sync can fail to fetch for an account. Stored in `criteria.unknown` so
