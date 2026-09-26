@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Audit and clean up the accounts you follow on Bluesky. Filter by activity, interactions, mutuals, and custom scoring weights—entirely in your browser."
+    />
     <title>ByeSky — Bluesky Followings Cleanup</title>
     <link
       rel="icon"
@@ -17,10 +21,16 @@
         <div id="user-profile" class="header-actions hidden">
           <span id="user-handle" class="user-handle"></span>
           <span id="last-synced-time" class="last-synced-time"></span>
-          <button id="resync-btn" class="btn btn-secondary" aria-label="Resync Follow List">
+          <button id="resync-btn" class="btn btn-secondary" title="Resync Follow List">
             <span aria-hidden="true">⟳</span><span class="btn-label">Resync Follow List</span>
           </button>
-          <button id="logout-btn" class="btn btn-secondary">Log Out</button>
+          <button
+            id="logout-btn"
+            class="btn btn-secondary"
+            title="Sign out and clear cached data from this browser"
+          >
+            Log Out
+          </button>
         </div>
       </div>
     </header>
@@ -29,7 +39,7 @@
       <!-- Shown when the signed-in session is missing permissions added since it was granted -->
       <div id="reauth-banner" class="reauth-banner hidden" role="alert">
         <div class="reauth-banner-text">
-          <strong>ByeSky needs an extra permission.</strong>
+          <strong id="reauth-banner-title">ByeSky needs an extra permission.</strong>
           <span id="reauth-banner-detail"></span>
         </div>
         <button type="button" id="reauth-btn" class="btn btn-primary btn-sm">Sign in again</button>
@@ -38,9 +48,7 @@
       <!-- App Loading State -->
       <section id="app-loading-section" class="card">
         <div class="spinner"></div>
-        <p style="font-size: 1.1rem; color: var(--text-secondary); margin: 0; font-weight: 500">
-          Loading ByeSky...
-        </p>
+        <p class="loading-message">Loading ByeSky...</p>
       </section>
 
       <!-- Section 1: Account Connection -->
@@ -61,44 +69,92 @@
               placeholder="username.bsky.social"
               required
               autocomplete="username"
+              autocapitalize="none"
+              autocorrect="off"
+              spellcheck="false"
             />
           </div>
-          <div id="login-error" class="error-msg hidden"></div>
+          <div id="login-error" class="error-msg hidden" role="alert"></div>
           <button type="submit" id="login-btn" class="btn btn-primary">Connect with Bluesky</button>
         </form>
+
+        <div class="permissions-note" id="permissions-note">
+          <h3>What ByeSky asks permission for</h3>
+          <ul>
+            <li>
+              <strong>Read</strong> who you follow, your notifications, and public profiles and
+              posts, to score each account.
+            </li>
+            <li>
+              <strong>Follow and unfollow</strong> accounts, only when you confirm it. ByeSky can't
+              post, like, block or change your profile.
+            </li>
+            <li>
+              <strong>List your DM conversations</strong>, to see who you talk to. ByeSky never
+              sends messages.
+            </li>
+          </ul>
+          <p>
+            Bluesky's sign-in screen uses broader labels for these, such as
+            <em>"Access specific parts of your Bluesky account"</em> and
+            <em>"Chat: Read and send messages"</em>. Everything ByeSky finds stays in this browser.
+          </p>
+        </div>
       </section>
 
       <!-- Section 2: Sync and Analysis Progress -->
       <section id="sync-section" class="card hidden">
         <h2>Analyzing Followings</h2>
         <p class="description">
-          Retrieving profile statistics and analyzing recent activity. This may take a minute
-          depending on the number of follows.
+          ByeSky works at a gentle pace so your other Bluesky apps keep working while it runs. Large
+          follow lists can take 10 minutes or more, and you can keep this tab in the background.
         </p>
 
+        <h3 id="sync-step-title" class="sync-step-title" aria-live="polite">Starting sync…</h3>
+
         <div class="progress-container">
-          <div class="progress-bar-track">
-            <div id="sync-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
+          <div
+            class="progress-bar-track"
+            role="progressbar"
+            aria-labelledby="sync-step-title"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+            id="sync-progress-track"
+          >
+            <div id="sync-progress-bar" class="progress-bar-fill"></div>
           </div>
           <div class="progress-stats">
             <span id="sync-stage">Starting sync...</span>
             <span id="sync-percent">0%</span>
           </div>
+          <p id="sync-eta" class="sync-eta hidden"></p>
+          <p id="sync-elsewhere" class="sync-eta hidden">
+            This sync is running in another ByeSky tab. This tab will update when it's done.
+          </p>
         </div>
 
-        <div id="sync-error" class="error-msg hidden"></div>
+        <div id="skip-mutuals" class="skip-mutuals hidden">
+          <p>
+            Looking up mutual followers roughly doubles how long this step takes. Skip it and
+            they'll load when you preview an account instead.
+          </p>
+          <button id="skip-mutuals-btn" type="button" class="btn btn-secondary">
+            Skip mutual followers
+          </button>
+        </div>
 
-        <div
-          class="sync-actions"
-          style="margin-top: 16px; display: flex; gap: 12px; justify-content: center"
-        >
+        <div id="sync-error" class="error-msg hidden" role="alert"></div>
+
+        <div class="sync-actions">
           <button id="cancel-sync-btn" class="btn btn-secondary">Cancel Sync</button>
           <button id="retry-sync-btn" class="btn btn-primary hidden">Try Sync Again</button>
         </div>
       </section>
 
       <!-- Section 3: Cleanup Dashboard -->
-      <section id="dashboard-section" class="hidden">
+      <section id="dashboard-section" class="hidden" aria-labelledby="dashboard-heading">
+        <h2 id="dashboard-heading" class="visually-hidden">Following Cleanup Dashboard</h2>
         <div class="dashboard-grid">
           <!-- Sidebar: Unified Criteria Filters, Weights & Thresholds.
                Expanded sidebar on wide screens (collapsible to a rail); collapsed bar on narrow screens. -->
@@ -127,11 +183,11 @@
               <div class="status-toggles-bar">
                 <label class="checkbox-control status-pill">
                   <input type="checkbox" id="filter-ok" checked />
-                  <span style="font-weight: 600; color: var(--success)">OK / Clean</span>
+                  <span class="status-pill-ok">OK / Clean</span>
                 </label>
                 <label class="checkbox-control status-pill">
                   <input type="checkbox" id="filter-locked" checked />
-                  <span style="font-weight: 600; color: var(--primary)">🔒 Locked</span>
+                  <span class="status-pill-locked">🔒 Locked</span>
                 </label>
               </div>
 
@@ -452,6 +508,14 @@
 
           <!-- Main Dashboard: Controls and Table -->
           <div class="dashboard-main">
+            <!-- Status / Undo / Error Toast -->
+            <div
+              id="action-toast"
+              class="action-toast card hidden"
+              role="status"
+              aria-live="polite"
+            ></div>
+
             <!-- Controls Toolbar -->
             <div class="toolbar card">
               <div class="search-box">
@@ -471,7 +535,9 @@
 
             <!-- Top Pagination Controls -->
             <div class="pagination-container pagination-top">
-              <span class="pagination-info">Showing 0 - 0 of 0 accounts</span>
+              <span class="pagination-info" aria-live="polite" aria-atomic="true"
+                >Showing 0 - 0 of 0 accounts</span
+              >
               <div class="pagination-controls">
                 <button class="btn btn-secondary btn-sm prev-page-btn" disabled>Previous</button>
                 <span class="pagination-pages"></span>
@@ -492,11 +558,19 @@
                       />
                     </th>
                     <th class="col-profile">Profile</th>
-                    <th class="sortable" data-sort="followers">Followers</th>
-                    <th class="sortable" data-sort="lastPost">Last Post</th>
-                    <th class="sortable" data-sort="lastInteraction">Last Interaction</th>
+                    <th class="sortable" data-sort="followers" aria-sort="none">
+                      <button type="button" class="sort-btn">Followers</button>
+                    </th>
+                    <th class="sortable" data-sort="lastPost" aria-sort="none">
+                      <button type="button" class="sort-btn">Last Post</button>
+                    </th>
+                    <th class="sortable" data-sort="lastInteraction" aria-sort="none">
+                      <button type="button" class="sort-btn">Last Interaction</button>
+                    </th>
                     <th class="col-flags">Criteria Flags</th>
-                    <th class="sortable text-center" data-sort="score">Score</th>
+                    <th class="sortable text-center" data-sort="score" aria-sort="descending">
+                      <button type="button" class="sort-btn">Score</button>
+                    </th>
                     <th class="col-action text-right">Action</th>
                   </tr>
                 </thead>
@@ -534,17 +608,20 @@
       </p>
     </footer>
 
-    <!-- Modal Backdrop for confirmation -->
-    <div id="confirm-modal" class="modal-backdrop hidden">
-      <div class="modal card">
-        <h3 id="modal-title" class="danger">Unfollow Confirmation</h3>
-        <p id="modal-desc"></p>
-        <div class="modal-buttons">
-          <button id="modal-cancel-btn" class="btn btn-secondary">Cancel</button>
-          <button id="modal-confirm-btn" class="btn btn-danger">Unfollow</button>
-        </div>
+    <!-- Native modal dialog for batch unfollow confirmation -->
+    <dialog
+      id="confirm-modal"
+      class="confirm-dialog card"
+      aria-labelledby="modal-title"
+      aria-describedby="modal-desc"
+    >
+      <h3 id="modal-title" class="text-danger">Unfollow Confirmation</h3>
+      <p id="modal-desc"></p>
+      <div class="modal-buttons">
+        <button type="button" id="modal-cancel-btn" class="btn btn-secondary">Cancel</button>
+        <button type="button" id="modal-confirm-btn" class="btn btn-danger">Unfollow</button>
       </div>
-    </div>
+    </dialog>
 
     <!-- Backdrop behind the expanded Criteria & Scoring sheet on narrow screens -->
     <div id="config-backdrop" class="config-backdrop" hidden></div>

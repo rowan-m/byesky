@@ -2,6 +2,7 @@
 // fakes (see fixtures.js) and the sync cache is seeded, so no network or sign-in is needed.
 import { test, expect } from '@playwright/test';
 import { mockSignedInApp } from './fixtures.js';
+import { OAUTH_SCOPE } from '../src/scopes.js';
 
 test.beforeEach(async ({ page }) => {
   await mockSignedInApp(page);
@@ -152,9 +153,9 @@ test('hover card shows on mouse hover', async ({ page, hasTouch }) => {
   await expect(page.locator('#profile-hover-card')).toContainText(/Bio for Account \d+/);
 });
 
-test.describe('session missing a newly required scope', () => {
+test.describe('session from before granular permissions', () => {
   test.beforeEach(async ({ page }) => {
-    // Re-register routes with an older grant that predates the chat scope.
+    // Re-register routes with an older, broad grant.
     await page.unrouteAll();
     await mockSignedInApp(page, {
       grantedScope: 'atproto transition:generic repo:app.bsky.graph.follow',
@@ -166,7 +167,7 @@ test.describe('session missing a newly required scope', () => {
   test('shows a re-auth prompt that starts sign-in', async ({ page }) => {
     const banner = page.locator('#reauth-banner');
     await expect(banner).toBeVisible();
-    await expect(banner).toContainText('direct messages');
+    await expect(banner).toContainText('narrowed its permissions');
 
     await page.locator('#reauth-btn').click();
     await expect
@@ -174,6 +175,18 @@ test.describe('session missing a newly required scope', () => {
       .toEqual(['e2e-user.bsky.social']);
     expect(await page.evaluate(() => sessionStorage.getItem('byesky:resyncAfterReauth'))).toBe('1');
   });
+});
+
+test('names what a newly required scope is for', async ({ page }) => {
+  const withoutChat = OAUTH_SCOPE.split(' ')
+    .filter((s) => !s.startsWith('rpc:chat.'))
+    .join(' ');
+  await page.unrouteAll();
+  await mockSignedInApp(page, { grantedScope: withoutChat });
+  await page.goto('/');
+  const banner = page.locator('#reauth-banner');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('include direct messages in interaction scoring');
 });
 
 test('no re-auth prompt when all scopes are granted', async ({ page }) => {

@@ -46,11 +46,12 @@ function makeFollowings(count = 40) {
   }));
 }
 
-const fakeAuthModule = (followings, grantedScope) => `
+const fakeAuthModule = (followings, grantedScope, syncState) => `
 import { syncCache } from '/src/cache.js';
 const USER_DID = ${JSON.stringify(USER_DID)};
 const followings = ${JSON.stringify(followings)};
 const grantedScope = ${JSON.stringify(grantedScope)};
+const syncState = ${JSON.stringify(syncState || null)};
 export function initOAuthClient() {
   return {
     async init() {
@@ -60,6 +61,7 @@ export function initOAuthClient() {
         progress: { total: followings.length, processed: followings.length, currentStage: 'Done' },
         followings,
         lockedDids: [],
+        ...syncState,
       });
       return {
         session: {
@@ -77,16 +79,25 @@ export function initOAuthClient() {
 `;
 
 const fakeAtprotoModule = `
+const app = { bsky: { actor: {
+  getProfile: async () => ({ data: { handle: 'e2e-user.bsky.social' } }),
+} } };
 export function createAgent() {
-  return {
-    api: { app: { bsky: { actor: {
-      getProfile: async () => ({ data: { handle: 'e2e-user.bsky.social' } }),
-    } } } },
-  };
+  return { app, api: { app } };
 }
-export function startBackgroundSync() {}
-export async function batchUnfollow() { return {}; }
-export async function followUser() { return {}; }
+export function createViewerAgent() {
+  return { app, api: { app } };
+}
+export function startBackgroundSync() { (window.__syncStarts ||= 0); window.__syncStarts++; return Promise.resolve(); }
+export function cancelSync() { window.__syncCancels = (window.__syncCancels || 0) + 1; }
+export async function batchUnfollow(agent, userDid, dids) {
+  if (window.__batchUnfollow) return window.__batchUnfollow(dids);
+  return { success: dids, failed: [] };
+}
+export async function followUser(agent, userDid, targetDid) {
+  if (window.__followUser) return window.__followUser(targetDid);
+  return { did: targetDid, followingUri: 'at://' + userDid + '/app.bsky.graph.follow/restored' };
+}
 export async function fetchAccountPreview(agent, userDid, targetDid) {
   const n = targetDid.replace('did:plc:acct', '');
   return {
@@ -99,14 +110,20 @@ export async function fetchAccountPreview(agent, userDid, targetDid) {
 `;
 
 /** Serves fake auth/API modules so the dashboard renders with fixture data. */
-export async function mockSignedInApp(page, { count = 40, grantedScope = OAUTH_SCOPE } = {}) {
-  const followings = makeFollowings(count);
+export async function mockSignedInApp(
+  page,
+  { count = 40, grantedScope = OAUTH_SCOPE, syncState = null, patches = {} } = {},
+) {
+  // patches: { [index]: { criteria: {...} } } merged into individual fixture accounts.
+  const followings = makeFollowings(count).map((f, i) =>
+    patches[i] ? { ...f, criteria: { ...f.criteria, ...patches[i].criteria } } : f,
+  );
   await page.route(
     (url) => url.pathname === '/src/auth.js',
     (route) =>
       route.fulfill({
         contentType: 'text/javascript',
-        body: fakeAuthModule(followings, grantedScope),
+        body: fakeAuthModule(followings, grantedScope, syncState),
       }),
   );
   await page.route(

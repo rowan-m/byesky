@@ -1,5 +1,7 @@
 // Pure scoring, filtering, sorting, and sanitization helpers for ByeSky.
 
+import { CRITERIA } from './criteria.js';
+
 export const SEVERE_LABELS = new Set([
   'spam',
   'impersonation',
@@ -55,7 +57,7 @@ export function escapeHTML(str) {
 export function sanitizeUrl(url, fallback = '') {
   if (!url || typeof url !== 'string') return fallback;
   const trimmed = url.trim();
-  if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
+  if (trimmed.startsWith('https://')) {
     return escapeHTML(trimmed);
   }
   return fallback;
@@ -65,7 +67,7 @@ export function truncateText(text, maxLength) {
   if (!text) return '';
   if (text.length <= maxLength) return escapeHTML(text);
   const truncated = text.substring(0, maxLength - 3) + '...';
-  return `<abbr title="${escapeHTML(text)}" style="text-decoration: none; cursor: help; border-bottom: none;">${escapeHTML(truncated)}</abbr>`;
+  return `<abbr class="truncated-text" title="${escapeHTML(text)}">${escapeHTML(truncated)}</abbr>`;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -120,100 +122,187 @@ export function summariseAuthorActivity(feed = [], now = Date.now()) {
   };
 }
 
+/**
+ * Bounds and defaults for the user-editable thresholds. Inputs are clamped to these so a
+ * typo can't silently switch a criterion off, and 0 stays 0 rather than becoming the default.
+ */
+export const PARAM_LIMITS = {
+  inactiveDays: { min: 7, max: 730, default: 180 },
+  lowFollowersThreshold: { min: 0, max: 100000, default: 50 },
+  noisyPostsThreshold: { min: 1, max: 100, default: 20 },
+  massFollowerThreshold: { min: 100, max: 100000, default: 3500 },
+};
+
+export function clampParam(key, value) {
+  const limits = PARAM_LIMITS[key];
+  const n = typeof value === 'number' ? Math.trunc(value) : Number.parseInt(value, 10);
+  if (!Number.isFinite(n)) return limits.default;
+  return Math.min(limits.max, Math.max(limits.min, n));
+}
+
+function normaliseParams(params = {}) {
+  const out = {};
+  for (const key of Object.keys(PARAM_LIMITS)) out[key] = clampParam(key, params[key]);
+  return out;
+}
+
+/**
+ * The criteria, in the order their badges are shown (see criteria.js). Each one evaluates
+ * to true (matches), false (doesn't) or null (unknown, because the data behind it couldn't
+ * be fetched).
+ */
+export const CRITERIA_IDS = CRITERIA.map(({ id }) => id);
+
+/**
+ * Data sources a sync can fail to fetch for an account. Stored in `criteria.unknown` so
+ * criteria that depend on them are treated as unknown instead of as a negative signal.
+ */
+export const UNKNOWN_SOURCE_LABELS = {
+  profile: 'profile statistics',
+  activity: 'recent posts',
+  inbound: 'notifications and DMs',
+  outbound: 'your posts and likes',
+};
+
+// Contact found is definite; no contact found only counts if the scan that looks for it worked.
+function noContact(found, scanFailed) {
+  if (found) return false;
+  return scanFailed ? null : true;
+}
+
+function hasInboundContact(c) {
+  return !!(
+    c.hasLikedUser ||
+    c.hasRepostedUser ||
+    c.hasRepliedToUser ||
+    c.hasMessagedUser ||
+    c.userInteracted
+  );
+}
+
+/**
+ * Evaluates every criterion for an account. This is the single source of truth for the
+ * score, the filters and the badges, so they can't disagree.
+ */
+export function evaluateCriteria(item, params = {}, now = Date.now()) {
+  const c = item.criteria || {};
+  const p = normaliseParams(params);
+  const unknown = new Set(Array.isArray(c.unknown) ? c.unknown : []);
+  const activityKnown = !unknown.has('activity');
+  const profileKnown = !unknown.has('profile');
+
+  let inactive = null;
+  if (activityKnown) {
+    let postMs = item._lastPostMs;
+    if (postMs === undefined) {
+      postMs = c.lastPostDate ? Date.parse(c.lastPostDate) || 0 : 0;
+    }
+    inactive = postMs > 0 ? (now - postMs) / DAY_MS > p.inactiveDays : false;
+  }
+
+  let noisy = null;
+  if (activityKnown) {
+    noisy =
+      typeof c.postsCount7Days === 'number'
+        ? c.postsCount7Days >= p.noisyPostsThreshold
+        : !!c.isNoisy;
+  }
+
+  let massFollower = null;
+  if (profileKnown) {
+    massFollower =
+      typeof c.followsCount === 'number'
+        ? c.followsCount >= p.massFollowerThreshold
+        : !!c.isMassFollower;
+  }
+
+  const hasInbound = hasInboundContact(c);
+  const hasOutbound = !!c.userContactedThem;
+  const mutualsKnown = typeof c.mutualsCount === 'number';
+
+  const matches = {
+    deletedBanned: !!(c.isDeleted || c.isBanned),
+    blocking: !!(c.isBlocking || c.isBlocked),
+    neverPosted: activityKnown ? !c.lastPostDate : null,
+    inactive,
+    notFollowing: !c.isFollowingUser,
+    noInbound: noContact(hasInbound, unknown.has('inbound')),
+    noOutbound: noContact(hasOutbound, unknown.has('outbound')),
+    noisy,
+    muted: profileKnown ? !!c.isMuted : null,
+    massFollower,
+    spammyRatio: profileKnown ? !!c.isSpammyRatio : null,
+    flagged: profileKnown ? !!c.isFlagged : null,
+    outlier: mutualsKnown ? c.mutualsCount === 0 : null,
+    lowFollowers:
+      profileKnown && typeof c.followersCount === 'number'
+        ? c.followersCount < p.lowFollowersThreshold
+        : null,
+  };
+
+  return {
+    matches,
+    hasInbound,
+    hasOutbound,
+    // Sources that failed, for the "data incomplete" badge. Skipped mutuals aren't a failure.
+    unknownSources: [...unknown].filter((s) => s in UNKNOWN_SOURCE_LABELS),
+  };
+}
+
+function weightFor(id, weights) {
+  if (id === 'neverPosted') return weights.neverPosted ?? weights.inactive ?? 0;
+  return weights[id] ?? 0;
+}
+
+export function scoreEvaluation(evaluation, weights) {
+  let score = 0;
+  for (const id of CRITERIA_IDS) {
+    if (evaluation.matches[id] === true) score += weightFor(id, weights);
+  }
+  return score;
+}
+
+/**
+ * An account is OK when nothing that carries weight matches. Criteria the user has set to
+ * weight 0 are informational only, and unknown criteria never count against an account.
+ */
+export function isEvaluationOk(evaluation, weights) {
+  return CRITERIA_IDS.every(
+    (id) => evaluation.matches[id] !== true || weightFor(id, weights) === 0,
+  );
+}
+
 export function isUserNeverPosted(item) {
-  return !item.criteria?.lastPostDate;
+  return evaluateCriteria(item).matches.neverPosted === true;
 }
 
 export function isUserInactive(item, inactiveDays = 180, now = Date.now()) {
-  if (item.criteria?.lastPostDate) {
-    const lastPost = new Date(item.criteria.lastPostDate).getTime();
-    const daysSincePost = (now - lastPost) / (1000 * 60 * 60 * 24);
-    return daysSincePost > inactiveDays;
-  }
-  return false; // Accounts with no posts are handled distinctly by isUserNeverPosted
+  return evaluateCriteria(item, { inactiveDays }, now).matches.inactive === true;
 }
 
 export function isUserNoisy(item, noisyPostsThreshold = 20) {
-  const threshold = noisyPostsThreshold || 20;
-  if (item.criteria.postsCount7Days !== undefined) {
-    return item.criteria.postsCount7Days >= threshold;
-  }
-  return !!item.criteria.isNoisy;
+  return evaluateCriteria(item, { noisyPostsThreshold }).matches.noisy === true;
 }
 
 export function isUserMassFollower(item, massFollowerThreshold = 3500) {
-  const threshold = massFollowerThreshold || 3500;
-  if (item.criteria.followsCount !== undefined) {
-    return item.criteria.followsCount >= threshold;
-  }
-  return !!item.criteria.isMassFollower;
+  return evaluateCriteria(item, { massFollowerThreshold }).matches.massFollower === true;
 }
 
 export function calculateScore(item, weights, params, now = Date.now()) {
-  let score = 0;
+  return scoreEvaluation(evaluateCriteria(item, params, now), weights);
+}
 
-  if (item.criteria.isDeleted || item.criteria.isBanned) {
-    score += weights.deletedBanned;
-  }
-
-  if (!item.criteria.isFollowingUser) {
-    score += weights.notFollowing;
-  }
-
-  if (isUserNeverPosted(item)) {
-    score += weights.neverPosted !== undefined ? weights.neverPosted : weights.inactive;
-  } else if (isUserInactive(item, params.inactiveDays, now)) {
-    score += weights.inactive;
-  }
-
-  const hasInbound =
-    item.criteria.hasLikedUser ||
-    item.criteria.hasRepostedUser ||
-    item.criteria.hasRepliedToUser ||
-    item.criteria.hasMessagedUser ||
-    item.criteria.userInteracted;
-  if (!hasInbound) {
-    score += weights.noInbound;
-  }
-
-  const hasOutbound = item.criteria.userContactedThem;
-  if (!hasOutbound) {
-    score += weights.noOutbound;
-  }
-
-  if (item.criteria.isBlocking || item.criteria.isBlocked) {
-    score += weights.blocking;
-  }
-
-  if (isUserNoisy(item, params.noisyPostsThreshold)) {
-    score += weights.noisy;
-  }
-
-  if (item.criteria.isMuted) {
-    score += weights.muted;
-  }
-
-  if (isUserMassFollower(item, params.massFollowerThreshold)) {
-    score += weights.massFollower;
-  }
-
-  if (item.criteria.isSpammyRatio) {
-    score += weights.spammyRatio;
-  }
-
-  if (item.criteria.isFlagged) {
-    score += weights.flagged;
-  }
-
-  if (item.criteria.isOutlier) {
-    score += weights.outlier;
-  }
-
-  if (weights.lowFollowers && item.criteria.followersCount < (params.lowFollowersThreshold || 50)) {
-    score += weights.lowFollowers;
-  }
-
-  return score;
+/**
+ * Precomputes parsed timestamps and lowercase search text on an item when followings are
+ * loaded, avoiding repeated Date.parse() and toLowerCase() work during filtering/sorting.
+ */
+export function prepareFollowing(item) {
+  const c = item.criteria || {};
+  const interactionDate = c.lastInteraction?.date || c.lastLikeDate;
+  item._lastPostMs = c.lastPostDate ? Date.parse(c.lastPostDate) || 0 : 0;
+  item._lastInteractionMs = interactionDate ? Date.parse(interactionDate) || 0 : 0;
+  item._searchText = `${(item.handle || '').toLowerCase()}\n${(item.displayName || '').toLowerCase()}`;
+  return item;
 }
 
 export function filterAndSortFollowings(
@@ -227,116 +316,67 @@ export function filterAndSortFollowings(
   } else if (Array.isArray(lockedDids)) {
     lockedSet = new Set(lockedDids);
   }
-  const showLocked = filters.locked !== undefined ? filters.locked : true;
-  const showNeverPosted = filters.neverPosted !== undefined ? filters.neverPosted : true;
+  const showLocked = filters.locked ?? true;
+  const activeFilters = { ...filters, neverPosted: filters.neverPosted ?? true };
+  const queryLower = searchQuery ? searchQuery.toLowerCase() : '';
 
-  return followings
-    .map((item) => {
-      const score = calculateScore(item, weights, params, now);
-      const neverPosted = isUserNeverPosted(item);
-      const dynamicInactive = isUserInactive(item, params.inactiveDays, now);
-      const isLocked = lockedSet.has(item.did);
-      return { ...item, score, neverPosted, dynamicInactive, isLocked };
-    })
-    .filter((item) => {
-      // Search
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        const nMatch = item.displayName && item.displayName.toLowerCase().includes(q);
-        const hMatch = item.handle && item.handle.toLowerCase().includes(q);
-        if (!nMatch && !hMatch) return false;
-      }
+  const filtered = [];
+  for (const item of followings) {
+    if (queryLower) {
+      const haystack =
+        item._searchText ??
+        `${(item.handle || '').toLowerCase()}\n${(item.displayName || '').toLowerCase()}`;
+      if (!haystack.includes(queryLower)) continue;
+    }
 
-      // Locked / Protected accounts filter
-      if (item.isLocked) {
-        return showLocked;
-      }
+    const isLocked = lockedSet.has(item.did);
+    if (isLocked && !showLocked) continue;
 
-      // Determine warning/inactive criteria matches
-      const hasInbound =
-        item.criteria.hasLikedUser ||
-        item.criteria.hasRepostedUser ||
-        item.criteria.hasRepliedToUser ||
-        item.criteria.hasMessagedUser ||
-        item.criteria.userInteracted;
+    const evaluation = evaluateCriteria(item, params, now);
+    const isOk = isEvaluationOk(evaluation, weights);
 
-      const hasOutbound = item.criteria.userContactedThem;
+    // Shown if it's locked (and showLocked is true), or if it's OK and OK is ticked,
+    // or if it matches at least one ticked criterion. Unknown (null) criteria never match.
+    const matchesFilter =
+      isLocked ||
+      (isOk && activeFilters.ok) ||
+      CRITERIA_IDS.some((id) => activeFilters[id] && evaluation.matches[id] === true);
+    if (!matchesFilter) continue;
 
-      const criteriaMatches = {
-        notFollowing: !item.criteria.isFollowingUser,
-        neverPosted: item.neverPosted,
-        inactive: item.dynamicInactive,
-        noInbound: !hasInbound,
-        noOutbound: !hasOutbound,
-        deletedBanned: !!(item.criteria.isDeleted || item.criteria.isBanned),
-        blocking: !!(item.criteria.isBlocking || item.criteria.isBlocked),
-        lowFollowers: item.criteria.followersCount < params.lowFollowersThreshold,
-        noisy: isUserNoisy(item, params.noisyPostsThreshold),
-        muted: !!item.criteria.isMuted,
-        massFollower: isUserMassFollower(item, params.massFollowerThreshold),
-        spammyRatio: !!item.criteria.isSpammyRatio,
-        flagged: !!item.criteria.isFlagged,
-        outlier: !!item.criteria.isOutlier,
-      };
-
-      // Account has "OK" status if it has none of the warning/inactive flags
-      const isOk =
-        !criteriaMatches.notFollowing &&
-        !criteriaMatches.neverPosted &&
-        !criteriaMatches.inactive &&
-        !criteriaMatches.noInbound &&
-        !criteriaMatches.noOutbound &&
-        !criteriaMatches.deletedBanned &&
-        !criteriaMatches.blocking &&
-        !criteriaMatches.lowFollowers &&
-        !criteriaMatches.noisy &&
-        !criteriaMatches.muted &&
-        !criteriaMatches.massFollower &&
-        !criteriaMatches.spammyRatio &&
-        !criteriaMatches.flagged &&
-        !criteriaMatches.outlier;
-
-      // OR Filter check: The item is shown if it matches at least one checked criterion
-      let matchesFilter = false;
-
-      if (isOk && filters.ok) matchesFilter = true;
-      if (criteriaMatches.notFollowing && filters.notFollowing) matchesFilter = true;
-      if (criteriaMatches.neverPosted && showNeverPosted) matchesFilter = true;
-      if (criteriaMatches.inactive && filters.inactive) matchesFilter = true;
-      if (criteriaMatches.noInbound && filters.noInbound) matchesFilter = true;
-      if (criteriaMatches.noOutbound && filters.noOutbound) matchesFilter = true;
-      if (criteriaMatches.deletedBanned && filters.deletedBanned) matchesFilter = true;
-      if (criteriaMatches.blocking && filters.blocking) matchesFilter = true;
-      if (criteriaMatches.lowFollowers && filters.lowFollowers) matchesFilter = true;
-      if (criteriaMatches.noisy && filters.noisy) matchesFilter = true;
-      if (criteriaMatches.muted && filters.muted) matchesFilter = true;
-      if (criteriaMatches.massFollower && filters.massFollower) matchesFilter = true;
-      if (criteriaMatches.spammyRatio && filters.spammyRatio) matchesFilter = true;
-      if (criteriaMatches.flagged && filters.flagged) matchesFilter = true;
-      if (criteriaMatches.outlier && filters.outlier) matchesFilter = true;
-
-      return matchesFilter;
-    })
-    .sort((a, b) => {
-      let valA, valB;
-      if (sorting.col === 'followers') {
-        valA = a.criteria.followersCount;
-        valB = b.criteria.followersCount;
-      } else if (sorting.col === 'lastPost') {
-        valA = a.criteria.lastPostDate ? new Date(a.criteria.lastPostDate).getTime() : 0;
-        valB = b.criteria.lastPostDate ? new Date(b.criteria.lastPostDate).getTime() : 0;
-      } else if (sorting.col === 'lastInteraction') {
-        const dateA = a.criteria.lastInteraction?.date || a.criteria.lastLikeDate;
-        const dateB = b.criteria.lastInteraction?.date || b.criteria.lastLikeDate;
-        valA = dateA ? new Date(dateA).getTime() : 0;
-        valB = dateB ? new Date(dateB).getTime() : 0;
-      } else if (sorting.col === 'score') {
-        valA = a.score;
-        valB = b.score;
-      }
-
-      if (valA < valB) return sorting.order === 'asc' ? -1 : 1;
-      if (valA > valB) return sorting.order === 'asc' ? 1 : -1;
-      return 0;
+    const score = scoreEvaluation(evaluation, weights);
+    filtered.push({
+      ...item,
+      score,
+      evaluation,
+      isOk,
+      neverPosted: evaluation.matches.neverPosted === true,
+      dynamicInactive: evaluation.matches.inactive === true,
+      isLocked,
     });
+  }
+
+  return filtered.sort((a, b) => {
+    let valA, valB;
+    if (sorting.col === 'followers') {
+      valA = a.criteria.followersCount ?? 0;
+      valB = b.criteria.followersCount ?? 0;
+    } else if (sorting.col === 'lastPost') {
+      valA =
+        a._lastPostMs ?? (a.criteria.lastPostDate ? Date.parse(a.criteria.lastPostDate) || 0 : 0);
+      valB =
+        b._lastPostMs ?? (b.criteria.lastPostDate ? Date.parse(b.criteria.lastPostDate) || 0 : 0);
+    } else if (sorting.col === 'lastInteraction') {
+      const dateA = a.criteria.lastInteraction?.date || a.criteria.lastLikeDate;
+      const dateB = b.criteria.lastInteraction?.date || b.criteria.lastLikeDate;
+      valA = a._lastInteractionMs ?? (dateA ? Date.parse(dateA) || 0 : 0);
+      valB = b._lastInteractionMs ?? (dateB ? Date.parse(dateB) || 0 : 0);
+    } else if (sorting.col === 'score') {
+      valA = a.score;
+      valB = b.score;
+    }
+
+    if (valA < valB) return sorting.order === 'asc' ? -1 : 1;
+    if (valA > valB) return sorting.order === 'asc' ? 1 : -1;
+    return 0;
+  });
 }
