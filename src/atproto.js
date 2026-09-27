@@ -732,28 +732,60 @@ async function runSync(agent, userDid, onUpdate, signal) {
     if (onUpdate) onUpdate();
   }
 
-  // Analyze latest posts and latest likes using concurrent worker queue
+  // Analyze latest posts and latest likes using concurrent worker queues.
+  // Pacing is decoupled between two independent pipelines:
+  // - Public AppView (feeds): runs through publicAgent (6 req/s budget). 6 workers keep the
+  //   pipe full without being blocked by PDS pacing.
+  // - Authenticated PDS (mutual followers): runs through viewerAgent (3 req/s budget). 4 workers
+  //   keep the PDS pipe full. Skipping mutuals stops this queue immediately without stalling feeds.
   await progress(0, totalFollows, 'Analyzing activity (last posts and last likes)...', {
     step: syncStep('activity'),
   });
   if (onUpdate) onUpdate();
 
-  // Pacing comes from the shared per-host limiters; a few workers keep the pipe full
-  // while individual requests are in flight.
-  const concurrencyLimit = 6;
-  let activeIndex = 0;
+  const feedConcurrency = 6;
+  const mutualsConcurrency = 4;
+  let feedIndex = 0;
+  let feedProcessed = 0;
+  let mutualsIndex = 0;
+  let mutualsProcessed = 0;
   let mutualsSkipped = false;
+  let lastReportedProcessed = -1;
 
-  async function worker() {
-    while (activeIndex < followingsList.length) {
-      // Check for user-driven cancellation or newer session takeover
+  async function updateActivityProgress(force = false) {
+    const effectiveMutuals = mutualsSkipped ? totalFollows : mutualsProcessed;
+    const currentProcessed = mutualsSkipped
+      ? feedProcessed
+      : Math.floor((feedProcessed + effectiveMutuals) / 2);
+
+    if (
+      force ||
+      (currentProcessed !== lastReportedProcessed &&
+        (currentProcessed % 5 === 0 || currentProcessed >= totalFollows))
+    ) {
+      lastReportedProcessed = currentProcessed;
+      await progress(
+        currentProcessed,
+        totalFollows,
+        `Analyzing activity (${currentProcessed}/${totalFollows})...`,
+        {
+          followings: followingsList,
+        },
+      );
+      if (onUpdate) onUpdate();
+    }
+  }
+
+  async function feedWorker() {
+    while (feedIndex < followingsList.length) {
       checkAborted();
-      // The user can choose to skip mutuals part way through, so re-read the flag each time.
-      const { skipMutuals } = await syncCache.get(userDid);
-
-      const idx = activeIndex++;
+      const idx = feedIndex++;
       const f = followingsList[idx];
-      if (!f || f.criteria.isDeleted) continue;
+      if (!f || f.criteria.isDeleted) {
+        feedProcessed++;
+        await updateActivityProgress();
+        continue;
+      }
 
       // 1. Latest activity and 7-day frequency (Never Posted / Inactive / Noisy Poster).
       // Posts, replies and reposts all count, so fetch the unfiltered feed. Don't gate on
@@ -797,63 +829,72 @@ async function runSync(agent, userDid, onUpdate, signal) {
         applyActorError(f, err);
       }
 
-      // 2. Get latest like timestamp (Bypassed sequentially as outbound likes are already mapped in Phase 1)
+      feedProcessed++;
+      await updateActivityProgress();
+    }
+  }
 
-      // 3. Get mutual follows count (Social Outlier check). The user can skip this to halve
-      // the time the step takes; mutuals are then fetched on demand when previewing.
+  async function mutualsWorker() {
+    while (mutualsIndex < followingsList.length) {
+      checkAborted();
+      // The user can choose to skip mutuals part way through, so re-read the flag each time.
+      const { skipMutuals } = await syncCache.get(userDid);
       if (skipMutuals) {
         mutualsSkipped = true;
-      } else {
-        try {
-          const mutualsRes = await fetchWithBackoff(
-            userDid,
-            () =>
-              viewerAgent.api.app.bsky.graph.getKnownFollowers({
-                actor: f.did,
-                limit: 11,
-              }),
-            onUpdate,
-            limiters.pds,
-            signal,
-          );
-          const mutuals = mutualsRes.data.followers || [];
-          f.criteria.mutualsCount = mutuals.length;
-          f.criteria.hasMoreMutuals = mutuals.length > 10;
-          f.criteria.isOutlier = mutuals.length === 0;
-          f.preview = f.preview || { mutuals: [], lastPost: null };
-          f.preview.mutuals = mutuals.slice(0, 5).map((m) => ({
-            did: m.did,
-            handle: m.handle,
-            displayName: m.displayName || m.handle,
-            avatar: m.avatar || '',
-          }));
-        } catch (err) {
-          if (isCancel(err)) throw err;
-          console.warn(
-            `Could not fetch mutual follows for ${f.handle || f.did}:`,
-            err.message || err,
-          );
-        }
+        await updateActivityProgress(true);
+        break;
       }
 
-      // Periodically update progress
-      if (idx % 5 === 0 || idx === followingsList.length - 1) {
-        await progress(
-          idx + 1,
-          totalFollows,
-          `Analyzing activity (${idx + 1}/${totalFollows})...`,
-          {
-            followings: followingsList,
-          },
-        );
-        if (onUpdate) onUpdate();
+      const idx = mutualsIndex++;
+      const f = followingsList[idx];
+      if (!f || f.criteria.isDeleted) {
+        mutualsProcessed++;
+        await updateActivityProgress();
+        continue;
       }
+
+      // Get mutual follows count (Social Outlier check). The user can skip this to halve
+      // the time the step takes; mutuals are then fetched on demand when previewing.
+      try {
+        const mutualsRes = await fetchWithBackoff(
+          userDid,
+          () =>
+            viewerAgent.api.app.bsky.graph.getKnownFollowers({
+              actor: f.did,
+              limit: 11,
+            }),
+          onUpdate,
+          limiters.pds,
+          signal,
+        );
+        const mutuals = mutualsRes.data.followers || [];
+        f.criteria.mutualsCount = mutuals.length;
+        f.criteria.hasMoreMutuals = mutuals.length > 10;
+        f.criteria.isOutlier = mutuals.length === 0;
+        f.preview = f.preview || { mutuals: [], lastPost: null };
+        f.preview.mutuals = mutuals.slice(0, 5).map((m) => ({
+          did: m.did,
+          handle: m.handle,
+          displayName: m.displayName || m.handle,
+          avatar: m.avatar || '',
+        }));
+      } catch (err) {
+        if (isCancel(err)) throw err;
+        console.warn(
+          `Could not fetch mutual follows for ${f.handle || f.did}:`,
+          err.message || err,
+        );
+      }
+
+      mutualsProcessed++;
+      await updateActivityProgress();
     }
   }
 
   try {
-    const workers = Array.from({ length: concurrencyLimit }, () => worker());
-    await Promise.all(workers);
+    const feedWorkers = Array.from({ length: feedConcurrency }, () => feedWorker());
+    const mutualsWorkers = Array.from({ length: mutualsConcurrency }, () => mutualsWorker());
+    await Promise.all([...feedWorkers, ...mutualsWorkers]);
   } catch (err) {
     if (isCancel(err)) {
       console.log(`Sync abort requested and successfully executed for ${userDid}`);

@@ -360,6 +360,93 @@ test('startBackgroundSync paginates follows, maps interactions, and enriches acc
     },
   );
 
+  await t.test(
+    'decoupled queues allow skipping mutuals while author feeds complete independently',
+    async () => {
+      await syncCache.clear(userDid);
+      let mutualsCallCount = 0;
+      let resolveMutualsGate;
+      const mutualsGate = new Promise((resolve) => {
+        resolveMutualsGate = resolve;
+      });
+
+      // 10 accounts: with mutualsConcurrency=4, items 4-9 remain queued
+      const accounts = Array.from({ length: 10 }, (_, i) => ({
+        did: `did:plc:user${i}`,
+        handle: `user${i}.bsky.social`,
+        displayName: `User ${i}`,
+      }));
+
+      const authorFeeds = {};
+      for (let i = 0; i < accounts.length; i++) {
+        authorFeeds[accounts[i].did] =
+          i === 0
+            ? async () => {
+                await syncCache.set(userDid, { skipMutuals: true });
+                resolveMutualsGate();
+                return {
+                  data: {
+                    feed: [
+                      {
+                        post: {
+                          uri: `at://${accounts[i].did}/app.bsky.feed.post/1`,
+                          indexedAt: nowIso,
+                          record: { text: `Feed for ${accounts[i].handle}` },
+                        },
+                      },
+                    ],
+                  },
+                };
+              }
+            : [
+                {
+                  post: {
+                    uri: `at://${accounts[i].did}/app.bsky.feed.post/1`,
+                    indexedAt: nowIso,
+                    record: { text: `Feed for ${accounts[i].handle}` },
+                  },
+                },
+              ];
+      }
+
+      const { agent, viewerAgent } = makeFakeAgents({
+        followsPages: [accounts],
+        profiles: accounts.map((a) => ({
+          did: a.did,
+          followersCount: 10,
+          followsCount: 20,
+          postsCount: 1,
+        })),
+        authorFeeds,
+      });
+
+      viewerAgent.api.app.bsky.graph.getKnownFollowers = async () => {
+        mutualsCallCount++;
+        await mutualsGate;
+        return { data: { followers: [] } };
+      };
+
+      await startBackgroundSync(agent, userDid);
+      const cached = await syncCache.get(userDid);
+
+      assert.strictEqual(cached.status, 'completed');
+      assert.strictEqual(cached.mutualsSkipped, true);
+      // Concurrency is 4, so at most 4 mutual requests started before skip was observed
+      assert.ok(mutualsCallCount <= 4, `Expected <= 4 calls, got ${mutualsCallCount}`);
+
+      // All 10 accounts should have their feeds enriched
+      for (const a of accounts) {
+        const item = cached.followings.find((f) => f.did === a.did);
+        assert.ok(item, `Expected item for ${a.did}`);
+        assert.strictEqual(item.preview.lastPost.text, `Feed for ${a.handle}`);
+      }
+
+      // The 10th account was never fetched for mutuals
+      const lastUser = cached.followings.find((f) => f.did === 'did:plc:user9');
+      assert.strictEqual(lastUser.criteria.mutualsCount, undefined);
+    },
+  );
+
   await t.test('cancelSync aborts an in-flight sync', async () => {
     await syncCache.clear(userDid);
     let resolveFollows;
