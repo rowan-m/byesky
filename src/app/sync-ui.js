@@ -158,6 +158,7 @@ function showSyncSection(syncState) {
 function showSyncError(errMessage) {
   resyncBtn.disabled = false;
   hideLoading();
+  authSection.classList.add('hidden');
   skipMutualsPanel?.classList.add('hidden');
   syncEta?.classList.add('hidden');
   syncSection.classList.remove('hidden');
@@ -172,6 +173,7 @@ function showSyncError(errMessage) {
 function showSyncCancelled(errMessage) {
   resyncBtn.disabled = false;
   hideLoading();
+  authSection.classList.add('hidden');
   skipMutualsPanel?.classList.add('hidden');
   syncEta?.classList.add('hidden');
   syncSection.classList.remove('hidden');

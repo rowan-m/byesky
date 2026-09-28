@@ -3,16 +3,76 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ByeSky — Clean up who you follow on Bluesky</title>
     <meta
       name="description"
-      content="Audit and clean up the accounts you follow on Bluesky. Filter by activity, interactions, mutuals, and custom scoring weights—entirely in your browser."
+      content="Spot inactive, muted, or one-way Bluesky accounts. Score by real interactions, lock favourites, and unfollow in bulk."
     />
-    <title>ByeSky — Bluesky Followings Cleanup</title>
-    <link
-      rel="icon"
-      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👋</text></svg>"
+    <meta name="application-name" content="ByeSky" />
+    <meta name="author" content="Rowan Merewood" />
+    <meta name="theme-color" content="#0066cc" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b0f19" media="(prefers-color-scheme: dark)" />
+    <link rel="canonical" href="https://bye-sky.web.app/" />
+
+    <!-- OpenGraph / Bluesky / Social Sharing -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ByeSky" />
+    <meta property="og:locale" content="en_GB" />
+    <meta property="og:url" content="https://bye-sky.web.app/" />
+    <meta property="og:title" content="ByeSky — Clean up who you follow on Bluesky" />
+    <meta
+      property="og:description"
+      content="Spot inactive, muted, or one-way Bluesky accounts. Score by real interactions, lock favourites, and unfollow in bulk."
     />
+    <meta property="og:image" content="https://bye-sky.web.app/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="ByeSky dashboard showing custom scoring weights, criteria badges, and grouped select, lock, and unfollow controls for Bluesky accounts."
+    />
+
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon.png" />
+    <link rel="apple-touch-icon" href="/icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
     <link rel="stylesheet" href="/src/style.css" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "ByeSky",
+        "headline": "Clean up who you follow on Bluesky",
+        "url": "https://bye-sky.web.app/",
+        "image": "https://bye-sky.web.app/og-image.png",
+        "description": "Spot inactive, muted, or one-way Bluesky accounts. Score by real interactions, lock favourites, and unfollow in bulk.",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "Any",
+        "browserRequirements": "Requires a modern web browser with JavaScript and IndexedDB",
+        "isAccessibleForFree": true,
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "author": {
+          "@type": "Person",
+          "name": "Rowan Merewood",
+          "url": "https://bsky.app/profile/rowan.fyi"
+        },
+        "featureList": [
+          "Find inactive or never-posted Bluesky accounts",
+          "See who doesn't follow you back on Bluesky",
+          "Score accounts by real likes, replies, reposts, quotes, and DMs",
+          "Check mutual followers in common",
+          "Lock and protect favourite accounts from batch unfollow",
+          "Fast keyboard triage and bulk unfollow with one-click undo",
+          "100% client-side AT Protocol OAuth with granular permissions"
+        ]
+      }
+    </script>
   </head>
   <body>
     <header class="app-header">
@@ -46,18 +106,19 @@
       </div>
 
       <!-- App Loading State -->
-      <section id="app-loading-section" class="card">
+      <section id="app-loading-section" class="card hidden">
         <div class="spinner"></div>
         <p class="loading-message">Loading ByeSky...</p>
       </section>
 
-      <!-- Section 1: Account Connection -->
-      <section id="auth-section" class="card hidden">
-        <h2>Clean up your Bluesky Followings</h2>
+      <!-- Section 1: Account Connection (visible in initial HTML for instant load & search indexing) -->
+      <section id="auth-section" class="card">
+        <h2>Clean up who you follow on Bluesky</h2>
         <p class="description">
-          ByeSky helps you identify inactive, muted, or low-value accounts in your followings. Set
-          your own scoring rules, see who doesn't follow back, and safely clean up your list in
-          seconds. Sign in with your Bluesky account to get started.
+          ByeSky helps you review the accounts you follow on Bluesky and spot inactive, muted, or
+          one-way profiles. Set your own scoring weights, see who interacts with you, lock
+          favourites you want to keep, and unfollow in bulk or one by one. Sign in with your Bluesky
+          handle to get started.
         </p>
 
         <form id="login-form">
@@ -104,7 +165,7 @@
 
       <!-- Section 2: Sync and Analysis Progress -->
       <section id="sync-section" class="card hidden">
-        <h2>Analyzing Followings</h2>
+        <h2>Analyzing the accounts you follow</h2>
         <p class="description">
           ByeSky works at a gentle pace so your other Bluesky apps keep working while it runs. Large
           follow lists can take 10 minutes or more, and you can keep this tab in the background.
@@ -527,7 +588,7 @@
                   type="text"
                   id="table-search"
                   placeholder="Search by name or handle..."
-                  aria-label="Search followings by display name or handle"
+                  aria-label="Search accounts by display name or handle"
                 />
               </div>
               <div class="toolbar-actions">
@@ -621,7 +682,7 @@
               </table>
 
               <div id="empty-state" class="empty-state hidden">
-                <p>No followings match the active filters and search criteria.</p>
+                <p>No accounts match the active filters and search criteria.</p>
               </div>
             </div>
 

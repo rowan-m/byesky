@@ -277,3 +277,40 @@ test('malformed percent in OAuth error query parameter does not crash startup', 
   await expect(page.locator('#auth-section')).toBeVisible();
   await expect(page.locator('#login-error')).toContainText('100% failed');
 });
+
+test('SEO metadata, OpenGraph preview image, and JSON-LD structured data are present and served', async ({
+  page,
+  request,
+}) => {
+  await expect(page).toHaveTitle('ByeSky — Clean up who you follow on Bluesky');
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(
+    'content',
+    'ByeSky — Clean up who you follow on Bluesky',
+  );
+  await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
+    'content',
+    'https://bye-sky.web.app/og-image.png',
+  );
+  const metaDesc = await page.locator('meta[name="description"]').getAttribute('content');
+  const ogDesc = await page.locator('meta[property="og:description"]').getAttribute('content');
+  expect(metaDesc.length).toBeGreaterThanOrEqual(70);
+  expect(metaDesc.length).toBeLessThanOrEqual(125);
+  expect(ogDesc.length).toBeLessThanOrEqual(125);
+
+  const jsonLdText = await page.locator('script[type="application/ld+json"]').textContent();
+  const jsonLd = JSON.parse(jsonLdText);
+  expect(jsonLd['@type']).toBe('WebApplication');
+  expect(jsonLd.name).toBe('ByeSky');
+
+  for (const assetPath of [
+    '/og-image.png',
+    '/icon.png',
+    '/icon.svg',
+    '/robots.txt',
+    '/sitemap.xml',
+    '/site.webmanifest',
+  ]) {
+    const res = await request.get(assetPath);
+    expect(res.status(), `Expected 200 for ${assetPath}`).toBe(200);
+  }
+});

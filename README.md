@@ -1,6 +1,6 @@
-# ByeSky — Bluesky Followings Cleanup
+# ByeSky — Clean up who you follow on Bluesky
 
-ByeSky is a minimal client-side web application designed to help Bluesky / Atmosphere users audit and clean up their following list. It retrieves your followings, scores each account on custom criteria (such as inactivity, lack of follow-back, or absence of mutual interactions), and allows you to dynamically filter, sort, and batch-unfollow accounts.
+ByeSky is a minimal client-side web application that helps Bluesky / Atmosphere users review and clean up who they follow. It fetches the accounts you follow, scores each one against customisable criteria (such as inactivity, no follow-back, or lack of recent interactions), and lets you dynamically filter, sort, protect favourites, and unfollow in bulk or one by one.
 
 ---
 

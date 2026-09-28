@@ -124,6 +124,7 @@ export function buildClientMetadata(origin) {
     client_id: `${origin}/client-metadata.json`,
     client_name: 'ByeSky',
     client_uri: origin,
+    logo_uri: `${origin}/icon.png`,
     redirect_uris: [`${origin}/`],
     scope: OAUTH_SCOPE,
     grant_types: ['authorization_code', 'refresh_token'],

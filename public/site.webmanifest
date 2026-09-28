@@ -1,0 +1,23 @@
+{
+  "name": "ByeSky — Clean up who you follow on Bluesky",
+  "short_name": "ByeSky",
+  "description": "Spot inactive, muted, or one-way Bluesky accounts. Score by real interactions, lock favourites, and unfollow in bulk.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0f19",
+  "theme_color": "#0066cc",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
