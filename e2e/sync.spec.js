@@ -67,3 +67,14 @@ test('cancelling stops the running sync and saves the cancelled state', async ({
 test('"Last synced" is blank while the first sync is still running', async ({ page }) => {
   await expect(page.locator('#last-synced-time')).toHaveText('');
 });
+
+test('"Resync Follow List" button is disabled while sync is in progress and re-enabled on cancel', async ({
+  page,
+}) => {
+  const resyncBtn = page.locator('#resync-btn');
+  await expect(resyncBtn).toBeDisabled();
+
+  await page.locator('#cancel-sync-btn').click();
+  await expect(page.locator('#sync-section')).toContainText('Sync Cancelled');
+  await expect(resyncBtn).toBeEnabled();
+});

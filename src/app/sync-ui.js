@@ -46,17 +46,22 @@ export async function checkSyncStatus() {
     renderLastSynced(cachedState);
 
     if (cachedState.status === 'idle') {
+      resyncBtn.disabled = true;
       await triggerSync();
     } else if (cachedState.status === 'fetching' || cachedState.status === 'enriching') {
+      resyncBtn.disabled = true;
       showSyncSection(cachedState);
       // Restart background sync in browser and attach update callback
       atprotoApi.startBackgroundSync(state.agent, state.user.did, onSyncUpdate);
     } else if (cachedState.status === 'completed') {
+      resyncBtn.disabled = false;
       syncSection.classList.add('hidden');
       await loadFollowings();
     } else if (cachedState.status === 'cancelled') {
+      resyncBtn.disabled = false;
       showSyncCancelled(cachedState.error || 'Sync cancelled by user.');
     } else if (cachedState.status === 'error') {
+      resyncBtn.disabled = false;
       showSyncError(cachedState.error);
     }
   } catch (err) {
@@ -66,6 +71,7 @@ export async function checkSyncStatus() {
 
 export async function triggerSync() {
   if (!state.user) return;
+  resyncBtn.disabled = true;
   state.selectedDids.clear();
   selectAllCheckbox.checked = false;
   etaSample = null;
@@ -100,12 +106,16 @@ async function applySyncUpdate() {
     renderLastSynced(cachedState);
 
     if (cachedState.status === 'completed') {
+      resyncBtn.disabled = false;
       await loadFollowings();
     } else if (cachedState.status === 'cancelled') {
+      resyncBtn.disabled = false;
       showSyncCancelled(cachedState.error || 'Sync cancelled by user.');
     } else if (cachedState.status === 'error') {
+      resyncBtn.disabled = false;
       showSyncError(cachedState.error);
     } else {
+      resyncBtn.disabled = true;
       updateSyncProgressUI(cachedState);
     }
   } catch (err) {
@@ -126,6 +136,7 @@ export async function loadFollowings() {
     authSection.classList.add('hidden');
     syncSection.classList.add('hidden');
     dashboardSection.classList.remove('hidden');
+    resyncBtn.disabled = false;
     renderDashboard(true);
   } catch (err) {
     console.error('Load followings error:', err);
@@ -133,6 +144,7 @@ export async function loadFollowings() {
 }
 
 function showSyncSection(syncState) {
+  resyncBtn.disabled = true;
   hideLoading();
   authSection.classList.add('hidden');
   dashboardSection.classList.add('hidden');
@@ -144,6 +156,7 @@ function showSyncSection(syncState) {
 }
 
 function showSyncError(errMessage) {
+  resyncBtn.disabled = false;
   hideLoading();
   skipMutualsPanel?.classList.add('hidden');
   syncEta?.classList.add('hidden');
@@ -157,6 +170,7 @@ function showSyncError(errMessage) {
 }
 
 function showSyncCancelled(errMessage) {
+  resyncBtn.disabled = false;
   hideLoading();
   skipMutualsPanel?.classList.add('hidden');
   syncEta?.classList.add('hidden');
@@ -185,6 +199,7 @@ async function handleCancelSync() {
   } finally {
     cancelSyncBtn.disabled = false;
     cancelSyncBtn.textContent = 'Cancel Sync';
+    resyncBtn.disabled = false;
   }
 }
 
@@ -229,6 +244,9 @@ function updateSyncProgressUI(syncState) {
   const elsewhere = Boolean(syncState.runningElsewhere);
   syncElsewhere?.classList.toggle('hidden', !elsewhere);
   cancelSyncBtn.classList.toggle('hidden', elsewhere);
+
+  const inProgress = syncState.status === 'fetching' || syncState.status === 'enriching';
+  resyncBtn.disabled = inProgress;
 
   const inActivityStep = step?.id === 'activity' && syncState.status === 'enriching';
   skipMutualsPanel?.classList.toggle('hidden', !inActivityStep || skipped || elsewhere);
