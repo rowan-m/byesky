@@ -15,6 +15,8 @@ import {
   summariseAuthorActivity,
   evaluateCriteria,
   isEvaluationOk,
+  isAccountIncomplete,
+  defaultParams as getDefaultParams,
   clampParam,
   prepareFollowing,
 } from '../src/scoring.js';
@@ -476,5 +478,34 @@ test('Scoring & Sanitization Helpers', async (t) => {
     assert.strictEqual(item._lastPostMs, Date.parse(postDate));
     assert.strictEqual(item._lastInteractionMs, Date.parse(interactionDate));
     assert.strictEqual(item._searchText, 'alice.bsky.social\nalice example');
+  });
+
+  await t.test('defaultParams and isAccountIncomplete identify incomplete accounts', () => {
+    assert.deepStrictEqual(getDefaultParams(), defaultParams);
+
+    assert.strictEqual(
+      isAccountIncomplete({ criteria: { unknown: ['activity'], mutualsCount: 2 } }),
+      true,
+    );
+    assert.strictEqual(
+      isAccountIncomplete({
+        criteria: { isDeleted: true, unknown: ['activity'], mutualsCount: undefined },
+      }),
+      false,
+    );
+    assert.strictEqual(
+      isAccountIncomplete(
+        { criteria: { unknown: [], mutualsCount: undefined } },
+        { includeSkippedMutuals: false },
+      ),
+      false,
+    );
+    assert.strictEqual(
+      isAccountIncomplete(
+        { criteria: { unknown: [], mutualsCount: undefined } },
+        { includeSkippedMutuals: true },
+      ),
+      true,
+    );
   });
 });

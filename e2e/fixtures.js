@@ -89,10 +89,22 @@ export function createViewerAgent() {
   return { app, api: { app } };
 }
 export function startBackgroundSync() { (window.__syncStarts ||= 0); window.__syncStarts++; return Promise.resolve(); }
+export function retryIncompleteSync() { (window.__incompleteSyncStarts ||= 0); window.__incompleteSyncStarts++; return Promise.resolve(); }
 export function cancelSync() { window.__syncCancels = (window.__syncCancels || 0) + 1; }
 export async function batchUnfollow(agent, userDid, dids) {
   if (window.__batchUnfollow) return window.__batchUnfollow(dids);
   return { success: dids, failed: [] };
+}
+export async function batchFollow(agent, userDid, dids) {
+  (window.__batchFollowCalls ||= []).push(dids);
+  if (window.__batchFollow) return window.__batchFollow(dids);
+  return {
+    success: dids.map((did) => ({
+      did,
+      followingUri: 'at://' + userDid + '/app.bsky.graph.follow/restored',
+    })),
+    failed: [],
+  };
 }
 export async function followUser(agent, userDid, targetDid) {
   if (window.__followUser) return window.__followUser(targetDid);

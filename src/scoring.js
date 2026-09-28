@@ -140,6 +140,12 @@ export function clampParam(key, value) {
   return Math.min(limits.max, Math.max(limits.min, n));
 }
 
+export function defaultParams() {
+  return Object.fromEntries(
+    Object.entries(PARAM_LIMITS).map(([key, limits]) => [key, limits.default]),
+  );
+}
+
 function normaliseParams(params = {}) {
   const out = {};
   for (const key of Object.keys(PARAM_LIMITS)) out[key] = clampParam(key, params[key]);
@@ -247,6 +253,18 @@ export function evaluateCriteria(item, params = {}, now = Date.now()) {
     // Sources that failed, for the "data incomplete" badge. Skipped mutuals aren't a failure.
     unknownSources: [...unknown].filter((s) => s in UNKNOWN_SOURCE_LABELS),
   };
+}
+
+export function isAccountIncomplete(item, { includeSkippedMutuals = false } = {}) {
+  const c = item?.criteria;
+  if (!c || c.isDeleted || c.isBanned) return false;
+  if (Array.isArray(c.unknown) && c.unknown.some((s) => s in UNKNOWN_SOURCE_LABELS)) {
+    return true;
+  }
+  if (includeSkippedMutuals && typeof c.mutualsCount !== 'number') {
+    return true;
+  }
+  return false;
 }
 
 function weightFor(id, weights) {

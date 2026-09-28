@@ -4,7 +4,9 @@ import {
   cancelSyncBtn,
   dashboardSection,
   lastSyncedTime,
+  resumeSyncBtn,
   resyncBtn,
+  retryIncompleteBtn,
   retrySyncBtn,
   selectAllCheckbox,
   skipMutualsBtn,
@@ -18,6 +20,7 @@ import {
   syncSection,
   syncStage,
   syncStepTitle,
+  viewPartialBtn,
 } from './dom.js';
 import { formatLastSynced } from './format.js';
 import { hideLoading } from './session.js';
@@ -30,6 +33,9 @@ let syncUpdateFrame = null;
 
 export function setupSyncListeners() {
   resyncBtn.addEventListener('click', triggerSync);
+  retryIncompleteBtn?.addEventListener('click', triggerIncompleteSync);
+  resumeSyncBtn?.addEventListener('click', triggerIncompleteSync);
+  viewPartialBtn?.addEventListener('click', loadFollowings);
   cancelSyncBtn.addEventListener('click', handleCancelSync);
   retrySyncBtn.addEventListener('click', handleRetrySync);
   skipMutualsBtn?.addEventListener('click', handleSkipMutuals);
@@ -72,6 +78,7 @@ export async function checkSyncStatus() {
 export async function triggerSync() {
   if (!state.user) return;
   resyncBtn.disabled = true;
+  if (retryIncompleteBtn) retryIncompleteBtn.disabled = true;
   state.selectedDids.clear();
   selectAllCheckbox.checked = false;
   etaSample = null;
@@ -79,6 +86,18 @@ export async function triggerSync() {
   // Replaces (and waits for) any run already going in this tab; see startBackgroundSync.
   atprotoApi.startBackgroundSync(state.agent, state.user.did, onSyncUpdate);
   showSyncSection({ status: 'fetching', progress: {} });
+}
+
+export async function triggerIncompleteSync() {
+  if (!state.user) return;
+  resyncBtn.disabled = true;
+  if (retryIncompleteBtn) retryIncompleteBtn.disabled = true;
+  state.selectedDids.clear();
+  selectAllCheckbox.checked = false;
+  etaSample = null;
+
+  atprotoApi.retryIncompleteSync(state.agent, state.user.did, onSyncUpdate);
+  showSyncSection({ status: 'enriching', progress: {} });
 }
 
 /**
@@ -107,15 +126,19 @@ async function applySyncUpdate() {
 
     if (cachedState.status === 'completed') {
       resyncBtn.disabled = false;
+      if (retryIncompleteBtn) retryIncompleteBtn.disabled = false;
       await loadFollowings();
     } else if (cachedState.status === 'cancelled') {
       resyncBtn.disabled = false;
+      if (retryIncompleteBtn) retryIncompleteBtn.disabled = false;
       showSyncCancelled(cachedState.error || 'Sync cancelled by user.');
     } else if (cachedState.status === 'error') {
       resyncBtn.disabled = false;
+      if (retryIncompleteBtn) retryIncompleteBtn.disabled = false;
       showSyncError(cachedState.error);
     } else {
       resyncBtn.disabled = true;
+      if (retryIncompleteBtn) retryIncompleteBtn.disabled = true;
       updateSyncProgressUI(cachedState);
     }
   } catch (err) {
@@ -128,6 +151,7 @@ export async function loadFollowings() {
 
   try {
     const cachedState = await syncCache.get(state.user.did);
+    state.sync = cachedState;
     setFollowings(cachedState.followings || []);
     state.lockedDids = new Set(await syncCache.getLockedDids(state.user.did));
 
@@ -137,6 +161,7 @@ export async function loadFollowings() {
     syncSection.classList.add('hidden');
     dashboardSection.classList.remove('hidden');
     resyncBtn.disabled = false;
+    if (retryIncompleteBtn) retryIncompleteBtn.disabled = false;
     renderDashboard(true);
   } catch (err) {
     console.error('Load followings error:', err);
@@ -145,6 +170,10 @@ export async function loadFollowings() {
 
 function showSyncSection(syncState) {
   resyncBtn.disabled = true;
+  if (retryIncompleteBtn) {
+    retryIncompleteBtn.disabled = true;
+    retryIncompleteBtn.classList.add('hidden');
+  }
   hideLoading();
   authSection.classList.add('hidden');
   dashboardSection.classList.add('hidden');
@@ -152,11 +181,20 @@ function showSyncSection(syncState) {
   syncError.classList.add('hidden');
   cancelSyncBtn.classList.remove('hidden');
   retrySyncBtn.classList.add('hidden');
+  resumeSyncBtn?.classList.add('hidden');
+  viewPartialBtn?.classList.add('hidden');
   updateSyncProgressUI(syncState);
+}
+
+function togglePartialSyncButtons() {
+  const hasPartialFollowings = (state.sync?.followings?.length || 0) > 0;
+  resumeSyncBtn?.classList.toggle('hidden', !hasPartialFollowings);
+  viewPartialBtn?.classList.toggle('hidden', !hasPartialFollowings);
 }
 
 function showSyncError(errMessage) {
   resyncBtn.disabled = false;
+  if (retryIncompleteBtn) retryIncompleteBtn.disabled = false;
   hideLoading();
   authSection.classList.add('hidden');
   skipMutualsPanel?.classList.add('hidden');
@@ -168,10 +206,12 @@ function showSyncError(errMessage) {
   syncError.classList.remove('hidden');
   cancelSyncBtn.classList.add('hidden');
   retrySyncBtn.classList.remove('hidden');
+  togglePartialSyncButtons();
 }
 
 function showSyncCancelled(errMessage) {
   resyncBtn.disabled = false;
+  if (retryIncompleteBtn) retryIncompleteBtn.disabled = false;
   hideLoading();
   authSection.classList.add('hidden');
   skipMutualsPanel?.classList.add('hidden');
@@ -183,6 +223,7 @@ function showSyncCancelled(errMessage) {
   syncError.classList.remove('hidden');
   cancelSyncBtn.classList.add('hidden');
   retrySyncBtn.classList.remove('hidden');
+  togglePartialSyncButtons();
 }
 
 async function handleCancelSync() {
@@ -190,10 +231,11 @@ async function handleCancelSync() {
   cancelSyncBtn.textContent = 'Cancelling...';
   try {
     atprotoApi.cancelSync(state.user.did);
-    await syncCache.set(state.user.did, {
+    const cachedState = await syncCache.set(state.user.did, {
       status: 'cancelled',
       error: 'Synchronization aborted by user.',
     });
+    state.sync = cachedState;
     await syncCache.flush(state.user.did);
     showSyncCancelled('Synchronization aborted by user.');
   } catch (err) {
@@ -202,11 +244,14 @@ async function handleCancelSync() {
     cancelSyncBtn.disabled = false;
     cancelSyncBtn.textContent = 'Cancel Sync';
     resyncBtn.disabled = false;
+    if (retryIncompleteBtn) retryIncompleteBtn.disabled = false;
   }
 }
 
 async function handleRetrySync() {
   retrySyncBtn.classList.add('hidden');
+  resumeSyncBtn?.classList.add('hidden');
+  viewPartialBtn?.classList.add('hidden');
   cancelSyncBtn.classList.remove('hidden');
   syncError.classList.add('hidden');
   await triggerSync();
@@ -249,6 +294,7 @@ function updateSyncProgressUI(syncState) {
 
   const inProgress = syncState.status === 'fetching' || syncState.status === 'enriching';
   resyncBtn.disabled = inProgress;
+  if (retryIncompleteBtn) retryIncompleteBtn.disabled = inProgress;
 
   const inActivityStep = step?.id === 'activity' && syncState.status === 'enriching';
   skipMutualsPanel?.classList.toggle('hidden', !inActivityStep || skipped || elsewhere);

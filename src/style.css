@@ -623,8 +623,32 @@ input[type='number']:focus {
   line-height: 1.35;
 }
 
+.sidebar-legend-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sidebar-reset-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-family: var(--font-family);
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.sidebar-reset-btn:hover {
+  color: var(--primary-hover);
+}
+
 .sidebar-legend {
-  align-self: flex-end;
+  margin-left: auto;
   font-size: 0.68rem;
   font-weight: 600;
   color: var(--text-muted);
@@ -721,6 +745,40 @@ input[type='number']:focus {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.criteria-only-btn {
+  flex-shrink: 0;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background-color: var(--bg-app);
+  color: var(--text-muted);
+  font-family: var(--font-family);
+  font-size: 0.65rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: var(--transition);
+}
+
+.criteria-item:hover .criteria-only-btn,
+.criteria-only-btn:focus-visible,
+.criteria-only-btn.is-active {
+  opacity: 1;
+}
+
+.criteria-only-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.criteria-only-btn.is-active {
+  background-color: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
 }
 
 .criteria-weight {
@@ -881,6 +939,13 @@ input[type='number']:focus {
 
   .criteria-param input[type='number'] {
     height: 28px;
+  }
+
+  .criteria-only-btn {
+    opacity: 1;
+    height: 22px;
+    padding: 0 6px;
+    font-size: 0.7rem;
   }
 }
 
@@ -1386,6 +1451,21 @@ abbr.truncated-text {
   border-color: var(--primary);
 }
 
+button.badge-filter {
+  cursor: pointer;
+  line-height: inherit;
+  transition: var(--transition);
+}
+
+button.badge-filter:hover {
+  border-color: currentColor;
+}
+
+button.badge-filter.is-solo-filter {
+  box-shadow: 0 0 0 1.5px var(--primary);
+  border-color: var(--primary);
+}
+
 .score-cell {
   text-align: center;
   font-family: var(--font-mono);
@@ -1831,7 +1911,8 @@ tr.unfollowed-row td:not(.col-checkbox) {
     display: none;
   }
 
-  #resync-btn .btn-label {
+  #resync-btn .btn-label,
+  #retry-incomplete-btn .btn-label {
     position: absolute;
     width: 1px;
     height: 1px;

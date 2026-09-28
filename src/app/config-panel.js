@@ -1,9 +1,11 @@
-import { CRITERIA, FILTER_CONTROLS } from '../criteria.js';
-import { clampParam } from '../scoring.js';
+import { CRITERIA, defaultFilters, defaultWeights, FILTER_CONTROLS } from '../criteria.js';
+import { clampParam, defaultParams } from '../scoring.js';
+import { resetConfigBtn } from './dom.js';
 import { state } from './state.js';
 import { renderDashboard } from './table.js';
 
 const CONFIG_COLLAPSED_KEY = 'byesky:configCollapsed';
+const CRITERIA_PREFS_KEY = 'byesky:criteriaPrefs';
 // Keep in sync with the narrow-layout breakpoint in style.css.
 const narrowLayoutQuery = window.matchMedia('(max-width: 1100px)');
 
@@ -14,6 +16,131 @@ const PARAM_INPUTS = {
   'param-mass-follower': 'massFollowerThreshold',
 };
 
+function readStoredCriteriaPrefs() {
+  try {
+    const raw = localStorage.getItem(CRITERIA_PREFS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isDefaultConfig() {
+  const defW = defaultWeights();
+  const defF = defaultFilters();
+  const defP = defaultParams();
+  for (const { id } of CRITERIA) {
+    if (state.weights[id] !== defW[id]) return false;
+  }
+  for (const { key } of FILTER_CONTROLS) {
+    if (Boolean(state.filters[key]) !== defF[key]) return false;
+  }
+  for (const key of Object.keys(defP)) {
+    if (state.params[key] !== defP[key]) return false;
+  }
+  return true;
+}
+
+export function saveCriteriaPrefs() {
+  try {
+    if (isDefaultConfig()) {
+      localStorage.removeItem(CRITERIA_PREFS_KEY);
+    } else {
+      localStorage.setItem(
+        CRITERIA_PREFS_KEY,
+        JSON.stringify({
+          weights: state.weights,
+          filters: state.filters,
+          params: state.params,
+        }),
+      );
+    }
+  } catch {
+    // Storage unavailable (e.g. privacy mode); preference just won't persist.
+  }
+}
+
+export function getSoloFilterKey(filters = state.filters) {
+  const enabled = FILTER_CONTROLS.filter(({ key }) => Boolean(filters[key]));
+  return enabled.length === 1 ? enabled[0].key : null;
+}
+
+export function syncConfigDOMFromState() {
+  const soloKey = getSoloFilterKey();
+
+  for (const { id, weightId } of CRITERIA) {
+    const slider = document.getElementById(weightId);
+    if (slider) {
+      slider.value = String(state.weights[id]);
+      slider._syncWeightSeg?.();
+    }
+  }
+
+  for (const { key, label, filterId } of FILTER_CONTROLS) {
+    const checkbox = document.getElementById(filterId);
+    if (!checkbox) continue;
+    const checked = Boolean(state.filters[key]);
+    checkbox.checked = checked;
+    const parentItem = checkbox.closest('.criteria-item');
+    if (parentItem) {
+      parentItem.classList.toggle('is-filtered-out', !checked);
+    }
+    const onlyBtn = parentItem?.querySelector('.criteria-only-btn');
+    if (onlyBtn) {
+      const isSolo = soloKey === key;
+      onlyBtn.setAttribute('aria-pressed', String(isSolo));
+      onlyBtn.textContent = isSolo ? 'All' : 'Only';
+      onlyBtn.title = isSolo
+        ? 'Restore all filters'
+        : `Show only ${label} accounts (or Alt+Click checkbox)`;
+    }
+  }
+
+  for (const [id, key] of Object.entries(PARAM_INPUTS)) {
+    const input = document.getElementById(id);
+    if (input) {
+      input.value = String(state.params[key]);
+    }
+  }
+
+  resetConfigBtn?.classList.toggle('hidden', isDefaultConfig());
+  updateConfigSummary();
+}
+
+export function toggleSoloFilter(targetKey) {
+  const currentSolo = getSoloFilterKey();
+  if (currentSolo === targetKey) {
+    const restored =
+      state.preSoloFilters && getSoloFilterKey(state.preSoloFilters) !== targetKey
+        ? { ...state.preSoloFilters }
+        : defaultFilters();
+    state.filters = restored;
+    state.preSoloFilters = null;
+  } else {
+    if (!currentSolo) {
+      state.preSoloFilters = { ...state.filters };
+    }
+    state.filters = Object.fromEntries(FILTER_CONTROLS.map(({ key }) => [key, key === targetKey]));
+  }
+  state.pagination.currentPage = 1;
+  saveCriteriaPrefs();
+  syncConfigDOMFromState();
+  renderDashboard(false);
+}
+
+export function resetCriteriaConfig() {
+  state.weights = defaultWeights();
+  state.filters = defaultFilters();
+  state.preSoloFilters = null;
+  state.params = defaultParams();
+  state.pagination.currentPage = 1;
+  saveCriteriaPrefs();
+  syncConfigDOMFromState();
+  renderDashboard(false);
+}
+
 export function setupConfigListeners() {
   // Live weight adjustments
   for (const { id, weightId } of CRITERIA) {
@@ -22,10 +149,31 @@ export function setupConfigListeners() {
 
     slider.addEventListener('input', (e) => {
       state.weights[id] = parseInt(e.target.value, 10);
+      saveCriteriaPrefs();
+      resetConfigBtn?.classList.toggle('hidden', isDefaultConfig());
       renderDashboard(); // Re-render table and update scores instantly
     });
 
     enhanceWeightControl(slider);
+  }
+
+  // Inject "Only" solo filter button on each criterion row
+  for (const { id, label, filterId } of CRITERIA) {
+    const checkbox = document.getElementById(filterId);
+    const row = checkbox?.closest('.criteria-row');
+    const weightWrap = row?.querySelector('.criteria-weight');
+    if (row && weightWrap && !row.querySelector('.criteria-only-btn')) {
+      const onlyBtn = document.createElement('button');
+      onlyBtn.type = 'button';
+      onlyBtn.className = 'criteria-only-btn';
+      onlyBtn.dataset.filterKey = id;
+      onlyBtn.textContent = 'Only';
+      onlyBtn.setAttribute('aria-pressed', 'false');
+      onlyBtn.setAttribute('aria-label', `Show only ${label} accounts`);
+      onlyBtn.title = `Show only ${label} accounts (or Alt+Click checkbox)`;
+      onlyBtn.addEventListener('click', () => toggleSoloFilter(id));
+      row.insertBefore(onlyBtn, weightWrap);
+    }
   }
 
   // Filter checkboxes
@@ -33,20 +181,24 @@ export function setupConfigListeners() {
     const checkbox = document.getElementById(filterId);
     if (!checkbox) continue;
 
-    const parentItem = checkbox.closest('.criteria-item');
-    if (parentItem) {
-      parentItem.classList.toggle('is-filtered-out', !checkbox.checked);
-    }
+    checkbox.addEventListener('click', (e) => {
+      if (e.altKey) {
+        e.preventDefault();
+        toggleSoloFilter(key);
+      }
+    });
+
     checkbox.addEventListener('change', (e) => {
       state.filters[key] = e.target.checked;
-      if (parentItem) {
-        parentItem.classList.toggle('is-filtered-out', !e.target.checked);
-      }
+      state.preSoloFilters = null;
       state.pagination.currentPage = 1; // Reset to page 1 on filter
-      updateConfigSummary();
+      saveCriteriaPrefs();
+      syncConfigDOMFromState();
       renderDashboard();
     });
   }
+
+  resetConfigBtn?.addEventListener('click', resetCriteriaConfig);
 
   setupConfigPanel();
 
@@ -61,6 +213,8 @@ export function setupConfigListeners() {
       if (input.value.trim() === '') return;
       paramTimeout = setTimeout(() => {
         state.params[key] = clampParam(key, input.value);
+        saveCriteriaPrefs();
+        resetConfigBtn?.classList.toggle('hidden', isDefaultConfig());
         renderDashboard();
       }, 150);
     });
@@ -68,9 +222,13 @@ export function setupConfigListeners() {
       clearTimeout(paramTimeout);
       state.params[key] = clampParam(key, input.value);
       input.value = String(state.params[key]);
+      saveCriteriaPrefs();
+      resetConfigBtn?.classList.toggle('hidden', isDefaultConfig());
       renderDashboard();
     });
   }
+
+  syncConfigDOMFromState();
 }
 
 /**
@@ -106,6 +264,7 @@ function enhanceWeightControl(slider) {
       btn.tabIndex = isActive ? 0 : -1; // roving tabindex
     });
   };
+  slider._syncWeightSeg = sync;
 
   const select = (value, focus = false) => {
     const clamped = Math.min(max, Math.max(min, value));
@@ -278,6 +437,13 @@ function setupConfigPanel() {
 export function updateConfigSummary() {
   const summary = document.getElementById('config-summary');
   if (!summary) return;
+  const soloKey = getSoloFilterKey();
+  if (soloKey) {
+    const control = FILTER_CONTROLS.find(({ key }) => key === soloKey);
+    summary.textContent = `Only: ${control?.label || soloKey}`;
+    summary.classList.add('has-hidden');
+    return;
+  }
   const hiddenCount = Object.values(state.filters).filter((shown) => !shown).length;
   const plural = hiddenCount === 1 ? '' : 's';
   summary.textContent = hiddenCount === 0 ? 'All shown' : `${hiddenCount} filter${plural} off`;
@@ -299,5 +465,32 @@ export function initializeStateFromDOM() {
   for (const [id, key] of Object.entries(PARAM_INPUTS)) {
     const el = document.getElementById(id);
     if (el) state.params[key] = clampParam(key, el.value);
+  }
+
+  const stored = readStoredCriteriaPrefs();
+  if (stored) {
+    if (stored.weights && typeof stored.weights === 'object') {
+      for (const { id } of CRITERIA) {
+        const w = Number.parseInt(stored.weights[id], 10);
+        if (Number.isFinite(w) && w >= 0 && w <= 5) {
+          state.weights[id] = w;
+        }
+      }
+    }
+    if (stored.filters && typeof stored.filters === 'object') {
+      for (const { key } of FILTER_CONTROLS) {
+        if (typeof stored.filters[key] === 'boolean') {
+          state.filters[key] = stored.filters[key];
+        }
+      }
+    }
+    if (stored.params && typeof stored.params === 'object') {
+      for (const key of Object.keys(state.params)) {
+        if (stored.params[key] !== undefined) {
+          state.params[key] = clampParam(key, stored.params[key]);
+        }
+      }
+    }
+    syncConfigDOMFromState();
   }
 }

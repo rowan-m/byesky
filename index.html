@@ -81,6 +81,15 @@
         <div id="user-profile" class="header-actions hidden">
           <span id="user-handle" class="user-handle"></span>
           <span id="last-synced-time" class="last-synced-time"></span>
+          <button
+            id="retry-incomplete-btn"
+            type="button"
+            class="btn btn-secondary hidden"
+            title="Retry fetching data for incomplete accounts"
+          >
+            <span aria-hidden="true">⚡</span
+            ><span class="btn-label">Retry Incomplete (<span id="incomplete-count">0</span>)</span>
+          </button>
           <button id="resync-btn" class="btn btn-secondary" title="Resync Follow List">
             <span aria-hidden="true">⟳</span><span class="btn-label">Resync Follow List</span>
           </button>
@@ -209,6 +218,12 @@
 
         <div class="sync-actions">
           <button id="cancel-sync-btn" class="btn btn-secondary">Cancel Sync</button>
+          <button id="resume-sync-btn" type="button" class="btn btn-primary hidden">
+            Resume Incomplete
+          </button>
+          <button id="view-partial-btn" type="button" class="btn btn-secondary hidden">
+            View Partial Results
+          </button>
           <button id="retry-sync-btn" class="btn btn-primary hidden">Try Sync Again</button>
         </div>
       </section>
@@ -237,7 +252,17 @@
                 <p class="section-desc">
                   Toggle which accounts are shown and set each criterion's unfollow score weight.
                 </p>
-                <span class="sidebar-legend">Filter · Weight (0–5)</span>
+                <div class="sidebar-legend-bar">
+                  <button
+                    type="button"
+                    id="reset-config-btn"
+                    class="sidebar-reset-btn hidden"
+                    title="Reset weights, filters, and thresholds to defaults"
+                  >
+                    Reset defaults
+                  </button>
+                  <span class="sidebar-legend">Filter · Weight (0–5)</span>
+                </div>
               </div>
 
               <!-- Global Status Toggles (Non-scored) -->
