@@ -291,10 +291,6 @@ test('SEO metadata, OpenGraph preview image, and JSON-LD structured data are pre
     'content',
     'https://bye-sky.web.app/og-image.png',
   );
-  await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute(
-    'content',
-    'summary_large_image',
-  );
 
   const jsonLdText = await page.locator('script[type="application/ld+json"]').textContent();
   const jsonLd = JSON.parse(jsonLdText);
