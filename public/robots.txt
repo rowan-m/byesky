@@ -1,2 +1,4 @@
 User-agent: *
 Allow: /
+
+Sitemap: https://bye-sky.web.app/sitemap.xml

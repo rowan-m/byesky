@@ -289,7 +289,7 @@ async function runSync(agent, userDid, onUpdate, signal) {
 
       follows = follows.concat(response.data.follows || []);
       cursor = response.data.cursor;
-      await progress(follows.length, 0, `Retrieved ${follows.length} followings...`);
+      await progress(follows.length, 0, `Retrieved ${follows.length} accounts...`);
       if (onUpdate) onUpdate();
     } while (cursor);
   } catch (err) {
@@ -309,7 +309,7 @@ async function runSync(agent, userDid, onUpdate, signal) {
       status: 'completed',
       followings: [],
     });
-    await progress(0, 0, 'No followings found.');
+    await progress(0, 0, 'No followed accounts found.');
     if (onUpdate) onUpdate();
     return;
   }

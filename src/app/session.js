@@ -35,11 +35,18 @@ export function setupSessionListeners() {
 
 export async function checkSession() {
   try {
-    if (isLikelySignedIn()) loadAtprotoApi().catch(() => {}); // warm up in parallel
+    const hasOAuthParams =
+      /[?&](code|state|iss)=/.test(window.location.search) ||
+      /[#&](code|state|iss)=/.test(window.location.hash);
+    if (isLikelySignedIn() || hasOAuthParams) {
+      showLoading();
+      loadAtprotoApi().catch(() => {}); // warm up in parallel
+    }
     const oauthClient = initOAuthClient();
     const result = await oauthClient.init();
 
     if (result && result.session) {
+      showLoading();
       const api = await loadAtprotoApi();
       setSessionHint(true);
       state.session = result.session;
@@ -194,6 +201,13 @@ async function handleLogout() {
   state.selectedDids.clear();
   state.lockedDids.clear();
   showAuthSection();
+}
+
+export function showLoading() {
+  if (appLoadingSection) {
+    appLoadingSection.classList.remove('hidden');
+  }
+  authSection.classList.add('hidden');
 }
 
 export function hideLoading() {

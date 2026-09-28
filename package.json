@@ -1,8 +1,15 @@
 {
   "name": "byesky",
   "version": "1.0.0",
-  "description": "ByeSky — Bluesky Followings Cleanup",
-  "keywords": [],
+  "description": "ByeSky — Clean up who you follow on Bluesky",
+  "keywords": [
+    "bluesky",
+    "atproto",
+    "unfollow",
+    "following",
+    "cleanup",
+    "audit"
+  ],
   "license": "Apache-2.0",
   "author": "",
   "type": "module",

@@ -88,6 +88,7 @@ test('OAuth scopes', async (t) => {
       client_id: 'https://example.test/client-metadata.json',
       client_name: 'ByeSky',
       client_uri: 'https://example.test',
+      logo_uri: 'https://example.test/icon.png',
       redirect_uris: ['https://example.test/'],
       scope: OAUTH_SCOPE,
       grant_types: ['authorization_code', 'refresh_token'],
