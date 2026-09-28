@@ -291,6 +291,11 @@ test('SEO metadata, OpenGraph preview image, and JSON-LD structured data are pre
     'content',
     'https://bye-sky.web.app/og-image.png',
   );
+  const metaDesc = await page.locator('meta[name="description"]').getAttribute('content');
+  const ogDesc = await page.locator('meta[property="og:description"]').getAttribute('content');
+  expect(metaDesc.length).toBeGreaterThanOrEqual(70);
+  expect(metaDesc.length).toBeLessThanOrEqual(125);
+  expect(ogDesc.length).toBeLessThanOrEqual(125);
 
   const jsonLdText = await page.locator('script[type="application/ld+json"]').textContent();
   const jsonLd = JSON.parse(jsonLdText);
