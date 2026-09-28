@@ -212,10 +212,11 @@ export const CRITERIA = [
   },
 ];
 
-/** Filters that aren't criteria: accounts that are OK, and accounts the user has locked. */
+/** Filters that aren't criteria: accounts that are OK, and accounts the user has locked or unfollowed. */
 export const EXTRA_FILTERS = [
   { key: 'ok', filterId: 'filter-ok' },
   { key: 'locked', filterId: 'filter-locked' },
+  { key: 'unfollowed', filterId: 'filter-unfollowed' },
 ];
 
 /** Every filter checkbox, keyed by its `state.filters` property. */

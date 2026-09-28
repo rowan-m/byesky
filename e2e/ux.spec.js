@@ -110,6 +110,27 @@ test('unfollow shows status toast with Undo, and reports partial failures with R
   await expect(toast.getByRole('button', { name: 'Undo' })).toBeVisible();
 });
 
+test('unfollowed filter toggles visibility of unfollowed accounts', async ({ page }) => {
+  const firstRow = page.locator('#table-body tr').first();
+  const did = await firstRow.getAttribute('data-did');
+
+  await firstRow.locator('.unfollow-single-btn').click();
+  await expect(page.locator('#action-toast')).toContainText('Unfollowed 1 account.');
+
+  const unfollowedRow = page.locator(`#table-body tr[data-did="${did}"]`);
+  await expect(unfollowedRow).toBeVisible();
+  await expect(unfollowedRow).toHaveClass(/unfollowed-row/);
+
+  // Uncheck "Unfollowed" filter to hide it
+  const unfollowedFilter = page.locator('#filter-unfollowed');
+  await unfollowedFilter.uncheck();
+  await expect(unfollowedRow).toBeHidden();
+
+  // Re-check "Unfollowed" filter to restore visibility
+  await unfollowedFilter.check();
+  await expect(unfollowedRow).toBeVisible();
+});
+
 test('malformed percent in OAuth error query parameter does not crash startup', async ({
   page,
 }) => {

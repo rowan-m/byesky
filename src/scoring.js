@@ -317,6 +317,7 @@ export function filterAndSortFollowings(
     lockedSet = new Set(lockedDids);
   }
   const showLocked = filters.locked ?? true;
+  const showUnfollowed = filters.unfollowed ?? true;
   const activeFilters = { ...filters, neverPosted: filters.neverPosted ?? true };
   const queryLower = searchQuery ? searchQuery.toLowerCase() : '';
 
@@ -329,16 +330,21 @@ export function filterAndSortFollowings(
       if (!haystack.includes(queryLower)) continue;
     }
 
+    const isUnfollowed = item.followingUri === null || item.isUnfollowed === true;
+    if (isUnfollowed && !showUnfollowed) continue;
+
     const isLocked = lockedSet.has(item.did);
     if (isLocked && !showLocked) continue;
 
     const evaluation = evaluateCriteria(item, params, now);
     const isOk = isEvaluationOk(evaluation, weights);
 
-    // Shown if it's locked (and showLocked is true), or if it's OK and OK is ticked,
-    // or if it matches at least one ticked criterion. Unknown (null) criteria never match.
+    // Shown if it's unfollowed (and showUnfollowed is true), or locked (and showLocked is true),
+    // or if it's OK and OK is ticked, or if it matches at least one ticked criterion.
+    // Unknown (null) criteria never match.
     const matchesFilter =
-      isLocked ||
+      (isUnfollowed && showUnfollowed) ||
+      (isLocked && showLocked) ||
       (isOk && activeFilters.ok) ||
       CRITERIA_IDS.some((id) => activeFilters[id] && evaluation.matches[id] === true);
     if (!matchesFilter) continue;
@@ -352,6 +358,7 @@ export function filterAndSortFollowings(
       neverPosted: evaluation.matches.neverPosted === true,
       dynamicInactive: evaluation.matches.inactive === true,
       isLocked,
+      isUnfollowed,
     });
   }
 
