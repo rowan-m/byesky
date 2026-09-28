@@ -103,7 +103,7 @@ export async function fetchAccountPreview(agent, userDid, targetDid) {
   return {
     description: 'Bio for Account ' + n,
     preview: { mutuals: [], lastPost: null },
-    mutualsCount: 0,
+    mutualsCount: Number(n) % 12,
     hasMoreMutuals: false,
   };
 }

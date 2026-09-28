@@ -86,6 +86,9 @@ export function showActionToast({ message, isError = false, actions = [] }) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `btn btn-sm ${action.primary ? 'btn-primary' : 'btn-secondary'}`;
+    if (action.label === 'Undo') {
+      btn.dataset.toastUndo = 'true';
+    }
     btn.textContent = action.label;
     btn.addEventListener('click', () => action.onClick(btn));
     actionsWrap.appendChild(btn);
@@ -101,6 +104,14 @@ export function showActionToast({ message, isError = false, actions = [] }) {
 
   actionToast.replaceChildren(textSpan, actionsWrap);
   actionToast.classList.remove('hidden');
+}
+
+export function triggerUndoAction() {
+  if (!actionToast || actionToast.classList.contains('hidden')) return false;
+  const undoBtn = actionToast.querySelector('button[data-toast-undo="true"]:not(:disabled)');
+  if (!undoBtn) return false;
+  undoBtn.click();
+  return true;
 }
 
 async function handleUndoUnfollow(dids, triggerBtn) {
@@ -149,7 +160,7 @@ export async function executeUnfollow(dids, buttonEl) {
 
   if (buttonEl) {
     buttonEl.disabled = true;
-    buttonEl.textContent = 'unfollowing...';
+    buttonEl.textContent = '⏳';
   }
 
   if (!buttonEl && unlockedDids.length > 0) {
@@ -230,7 +241,7 @@ export async function executeUnfollow(dids, buttonEl) {
     });
     if (buttonEl) {
       buttonEl.disabled = false;
-      buttonEl.textContent = 'Unfollow';
+      buttonEl.textContent = '👋';
     }
   } finally {
     updateSelectedCounter();
@@ -238,8 +249,10 @@ export async function executeUnfollow(dids, buttonEl) {
 }
 
 export async function handleRefollow(did, handle, buttonEl) {
-  buttonEl.disabled = true;
-  buttonEl.textContent = 'Re-following...';
+  if (buttonEl) {
+    buttonEl.disabled = true;
+    buttonEl.textContent = '↩️ …';
+  }
 
   try {
     const data = await atprotoApi.followUser(state.agent, state.user.did, did);
@@ -259,7 +272,9 @@ export async function handleRefollow(did, handle, buttonEl) {
       message: `Couldn't re-follow @${handle || did}: ${err.message || err}`,
       isError: true,
     });
-    buttonEl.disabled = false;
-    buttonEl.textContent = 'Re-follow';
+    if (buttonEl) {
+      buttonEl.disabled = false;
+      buttonEl.textContent = '↩️ Re-follow';
+    }
   }
 }

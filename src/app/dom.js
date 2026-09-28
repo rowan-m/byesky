@@ -29,6 +29,8 @@ export const tableSearch = document.getElementById('table-search');
 export const selectAllCheckbox = document.getElementById('select-all');
 export const batchUnfollowBtn = document.getElementById('batch-unfollow-btn');
 export const selectedCountSpan = document.getElementById('selected-count');
+export const shortcutsToggleBtn = document.getElementById('shortcuts-toggle-btn');
+export const shortcutsLegend = document.getElementById('shortcuts-legend');
 export const emptyState = document.getElementById('empty-state');
 
 export const paginationInfos = document.querySelectorAll('.pagination-info');

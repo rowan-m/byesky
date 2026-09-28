@@ -942,6 +942,66 @@ input[type='number']:focus {
   max-width: 400px;
 }
 
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.shortcuts-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.shortcuts-toggle-btn[aria-expanded='true'] {
+  background-color: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--text-primary);
+}
+
+kbd,
+.kbd-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 1px 5px;
+  border: 1px solid var(--border-color);
+  border-bottom-width: 2px;
+  border-radius: var(--border-radius);
+  background-color: var(--bg-app);
+  color: var(--text-secondary);
+}
+
+.shortcuts-legend {
+  padding: 10px 14px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 16px;
+  align-items: center;
+}
+
+.shortcut-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.shortcut-item span {
+  margin-left: 4px;
+}
+
 /* Tables & Data */
 .table-container {
   padding: 0;
@@ -1023,7 +1083,7 @@ input[type='number']:focus {
 }
 
 .col-checkbox {
-  width: 68px;
+  width: 96px;
   text-align: center;
 }
 
@@ -1034,6 +1094,7 @@ input[type='number']:focus {
   accent-color: var(--primary);
   cursor: pointer;
   vertical-align: middle;
+  flex-shrink: 0;
 }
 
 .col-checkbox input:disabled {
@@ -1048,7 +1109,12 @@ input[type='number']:focus {
   gap: 4px;
 }
 
-.lock-toggle-btn {
+.cell-controls.is-unfollowed {
+  width: 100%;
+}
+
+.lock-toggle-btn,
+.unfollow-single-btn {
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--border-radius);
@@ -1061,11 +1127,12 @@ input[type='number']:focus {
   cursor: pointer;
   font-size: 0.78rem;
   line-height: 1;
-  opacity: 0.55;
+  opacity: 0.65;
   transition: var(--transition);
+  flex-shrink: 0;
 }
 
-.lock-toggle-btn:hover {
+.lock-toggle-btn:hover:not(:disabled) {
   opacity: 1;
   background-color: var(--bg-app);
   border-color: var(--border-color);
@@ -1075,6 +1142,26 @@ input[type='number']:focus {
   opacity: 1;
   background-color: var(--primary-light);
   border-color: var(--primary);
+}
+
+.unfollow-single-btn:hover:not(:disabled),
+.unfollow-single-btn:focus-visible {
+  opacity: 1;
+  background-color: var(--danger-light);
+  border-color: var(--danger);
+}
+
+.unfollow-single-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.refollow-single-btn {
+  width: 100%;
+  min-width: 76px;
+  padding: 2px 6px;
+  font-size: 0.72rem;
+  justify-content: center;
 }
 
 /* Monospace alignment fields for data explores */
@@ -1115,10 +1202,6 @@ abbr.truncated-text {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
-}
-
-.unfollowed-dash {
-  display: block;
 }
 
 /* Square, compact handled handles */
@@ -1331,22 +1414,32 @@ abbr.truncated-text {
   text-align: right;
 }
 
-.data-table td:last-child {
-  min-width: 100px;
-}
-
 .empty-state {
   text-align: center;
   padding: 32px 16px;
   color: var(--text-muted);
 }
 
-/* Selected active table states */
+/* Selected, active, and unfollowed table row states */
+tr.active-row td {
+  background-color: rgba(0, 102, 204, 0.07);
+}
+
+@media (prefers-color-scheme: dark) {
+  tr.active-row td {
+    background-color: rgba(56, 189, 248, 0.1);
+  }
+}
+
+tr.active-row td:first-child {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
 tr.selected-row td {
   background-color: var(--primary-light) !important;
 }
 
-tr.unfollowed-row td:not(.col-action) {
+tr.unfollowed-row td:not(.col-checkbox) {
   opacity: 0.5;
   text-decoration: line-through;
 }
@@ -1804,8 +1897,7 @@ tr.unfollowed-row td:not(.col-action) {
   }
 
   .data-table thead th.col-profile,
-  .data-table thead th.col-flags,
-  .data-table thead th.col-action {
+  .data-table thead th.col-flags {
     display: none;
   }
 
@@ -1826,7 +1918,7 @@ tr.unfollowed-row td:not(.col-action) {
     align-items: center;
     column-gap: 6px;
     row-gap: 4px;
-    padding: 8px 8px 8px 0;
+    padding: 8px;
     border-bottom: 1px solid var(--border-color);
   }
 
@@ -1837,8 +1929,8 @@ tr.unfollowed-row td:not(.col-action) {
   }
 
   .data-table td.col-checkbox {
-    flex: 0 0 44px;
-    width: 44px;
+    flex: 0 0 auto;
+    width: auto;
   }
 
   .data-table td.col-profile {
@@ -1851,16 +1943,11 @@ tr.unfollowed-row td:not(.col-action) {
     min-width: 24px;
   }
 
-  .data-table td.col-action {
-    flex: 0 0 auto;
-    min-width: 0;
-  }
-
-  /* Second line: flags, indented under the profile */
+  /* Second line: flags */
   .data-table td.col-flags {
     order: 10;
     flex: 1 0 100%;
-    padding-left: 44px;
+    padding-left: 0;
     white-space: normal;
   }
 
@@ -1873,7 +1960,7 @@ tr.unfollowed-row td:not(.col-action) {
   }
 
   .data-table td.col-followers {
-    margin-left: 44px;
+    margin-left: 0;
   }
 
   .data-table td.col-meta::before {
@@ -1886,11 +1973,20 @@ tr.unfollowed-row td:not(.col-action) {
     content: '· ' attr(data-label) ' ';
   }
 
+  tr.active-row {
+    box-shadow: inset 3px 0 0 var(--primary);
+  }
+
+  tr.active-row td:first-child {
+    box-shadow: none;
+  }
+
   tr.selected-row {
     background-color: var(--primary-light);
   }
 
-  .lock-toggle-btn {
+  .lock-toggle-btn,
+  .unfollow-single-btn {
     width: 28px;
     height: 28px;
   }
@@ -1901,8 +1997,8 @@ tr.unfollowed-row td:not(.col-action) {
   }
 
   .cell-controls {
-    flex-direction: column;
-    gap: 2px;
+    flex-direction: row;
+    gap: 3px;
   }
 
   /* Keep the batch action reachable while scrolling */
