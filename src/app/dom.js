@@ -21,6 +21,8 @@ export const skipMutualsPanel = document.getElementById('skip-mutuals');
 export const skipMutualsBtn = document.getElementById('skip-mutuals-btn');
 export const syncElsewhere = document.getElementById('sync-elsewhere');
 export const cancelSyncBtn = document.getElementById('cancel-sync-btn');
+export const resumeSyncBtn = document.getElementById('resume-sync-btn');
+export const viewPartialBtn = document.getElementById('view-partial-btn');
 export const retrySyncBtn = document.getElementById('retry-sync-btn');
 
 export const actionToast = document.getElementById('action-toast');
@@ -39,7 +41,10 @@ export const prevPageBtns = document.querySelectorAll('.prev-page-btn');
 export const nextPageBtns = document.querySelectorAll('.next-page-btn');
 
 export const resyncBtn = document.getElementById('resync-btn');
+export const retryIncompleteBtn = document.getElementById('retry-incomplete-btn');
+export const incompleteCountSpan = document.getElementById('incomplete-count');
 export const lastSyncedTime = document.getElementById('last-synced-time');
+export const resetConfigBtn = document.getElementById('reset-config-btn');
 
 // Unfollow Confirmation Modal Elements
 export const confirmModal = document.getElementById('confirm-modal');

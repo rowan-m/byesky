@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert';
 import {
   applyActorError,
+  batchFollow,
   batchUnfollow,
   cancelSync,
   fetchAccountPreview,
   followUser,
   quotedAuthorDid,
+  retryIncompleteSync,
   startBackgroundSync,
 } from '../src/atproto.js';
 import { syncCache } from '../src/cache.js';
@@ -553,4 +555,156 @@ test('batchUnfollow, followUser, and fetchAccountPreview', async (t) => {
     assert.strictEqual(previewRes.mutualsCount, 1);
     assert.strictEqual(previewRes.preview.lastPost.text, 'Latest preview post');
   });
+
+  await t.test('batchFollow creates follow records in batch and falls back on 400', async () => {
+    await syncCache.clear(userDid);
+    await syncCache.set(userDid, {
+      status: 'completed',
+      followings: [
+        { did: 'did:plc:a', handle: 'a.bsky.social', followingUri: null, criteria: {} },
+        { did: 'did:plc:b', handle: 'b.bsky.social', followingUri: null, criteria: {} },
+      ],
+    });
+
+    let applyWritesCalls = 0;
+    const { agent: batchAgent } = makeFakeAgents({
+      applyWritesImpl: async ({ writes }) => {
+        applyWritesCalls++;
+        return {
+          data: {
+            results: writes.map((_, idx) => ({
+              uri: `at://${userDid}/app.bsky.graph.follow/batch-${idx}`,
+            })),
+          },
+        };
+      },
+    });
+
+    const batchRes = await batchFollow(batchAgent, userDid, ['did:plc:a', 'did:plc:b']);
+    assert.strictEqual(applyWritesCalls, 1);
+    assert.strictEqual(batchRes.success.length, 2);
+    assert.strictEqual(batchRes.failed.length, 0);
+    assert.strictEqual(
+      batchRes.success[0].followingUri,
+      `at://${userDid}/app.bsky.graph.follow/batch-0`,
+    );
+
+    // Now test fallback to individual follow() on non-retryable 400 error
+    const { agent: fallbackAgent } = makeFakeAgents({
+      applyWritesImpl: async () => {
+        const err = new Error('InvalidRequest');
+        err.status = 400;
+        throw err;
+      },
+      followImpl: async (did) => {
+        if (did === 'did:plc:b') throw new Error('blocked target');
+        return { uri: `at://${userDid}/app.bsky.graph.follow/ind-${did}` };
+      },
+    });
+
+    const fallbackRes = await batchFollow(fallbackAgent, userDid, [
+      'did:plc:a',
+      'did:plc:b',
+      'did:plc:missing',
+    ]);
+    assert.strictEqual(fallbackRes.success.length, 1);
+    assert.strictEqual(fallbackRes.success[0].did, 'did:plc:a');
+    assert.strictEqual(fallbackRes.failed.length, 2);
+  });
+
+  await t.test(
+    'retryIncompleteSync only re-fetches incomplete accounts and missing mutuals',
+    async () => {
+      const nowIso = new Date().toISOString();
+      await syncCache.clear(userDid);
+      await syncCache.set(userDid, {
+        status: 'completed',
+        mutualsSkipped: true,
+        followings: [
+          {
+            did: 'did:plc:complete',
+            handle: 'complete.bsky.social',
+            criteria: {
+              followersCount: 100,
+              followsCount: 50,
+              postsCount: 10,
+              lastPostDate: nowIso,
+              mutualsCount: 3,
+              unknown: [],
+            },
+            preview: { mutuals: [], lastPost: { text: 'Already fetched' } },
+          },
+          {
+            did: 'did:plc:incomplete',
+            handle: 'incomplete.bsky.social',
+            criteria: {
+              followersCount: 0,
+              followsCount: 0,
+              postsCount: 0,
+              lastPostDate: null,
+              mutualsCount: undefined,
+              unknown: ['profile', 'activity'],
+            },
+            preview: { mutuals: [], lastPost: null },
+          },
+        ],
+      });
+
+      const profileFetchActors = [];
+      const feedFetchActors = [];
+      const mutualsFetchActors = [];
+
+      const { agent, viewerAgent, publicAgent } = makeFakeAgents({
+        profiles: [
+          { did: 'did:plc:incomplete', followersCount: 420, followsCount: 110, postsCount: 7 },
+        ],
+        authorFeeds: {
+          'did:plc:incomplete': [
+            {
+              post: {
+                uri: 'at://did:plc:incomplete/app.bsky.feed.post/1',
+                indexedAt: nowIso,
+                record: { text: 'Recovered post' },
+              },
+            },
+          ],
+        },
+        mutuals: {
+          'did:plc:incomplete': [{ did: 'did:plc:m1', handle: 'm1.bsky.social' }],
+        },
+      });
+
+      const origGetProfiles = viewerAgent.api.app.bsky.actor.getProfiles;
+      viewerAgent.api.app.bsky.actor.getProfiles = async (args) => {
+        profileFetchActors.push(...args.actors);
+        return origGetProfiles(args);
+      };
+
+      const origGetFeed = publicAgent.api.app.bsky.feed.getAuthorFeed;
+      publicAgent.api.app.bsky.feed.getAuthorFeed = async (args) => {
+        feedFetchActors.push(args.actor);
+        return origGetFeed(args);
+      };
+
+      const origGetMutuals = viewerAgent.api.app.bsky.graph.getKnownFollowers;
+      viewerAgent.api.app.bsky.graph.getKnownFollowers = async (args) => {
+        mutualsFetchActors.push(args.actor);
+        return origGetMutuals(args);
+      };
+
+      await retryIncompleteSync(agent, userDid);
+      const updated = await syncCache.get(userDid);
+
+      assert.strictEqual(updated.status, 'completed');
+      assert.deepStrictEqual(profileFetchActors, ['did:plc:incomplete']);
+      assert.deepStrictEqual(feedFetchActors, ['did:plc:incomplete']);
+      assert.deepStrictEqual(mutualsFetchActors, ['did:plc:incomplete']);
+
+      const recovered = updated.followings.find((f) => f.did === 'did:plc:incomplete');
+      assert.deepStrictEqual(recovered.criteria.unknown, []);
+      assert.strictEqual(recovered.criteria.followersCount, 420);
+      assert.strictEqual(recovered.criteria.mutualsCount, 1);
+      assert.strictEqual(recovered.preview.lastPost.text, 'Recovered post');
+    },
+  );
 });

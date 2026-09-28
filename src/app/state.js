@@ -1,5 +1,5 @@
 import { defaultFilters, defaultWeights } from '../criteria.js';
-import { prepareFollowing } from '../scoring.js';
+import { defaultParams, prepareFollowing } from '../scoring.js';
 
 // Application State
 export const state = {
@@ -30,12 +30,8 @@ export const state = {
   searchQuery: '',
   weights: defaultWeights(),
   filters: defaultFilters(),
-  params: {
-    inactiveDays: 180,
-    lowFollowersThreshold: 50,
-    noisyPostsThreshold: 20,
-    massFollowerThreshold: 3500,
-  },
+  preSoloFilters: null, // Previous filter map before soloing a single criterion
+  params: defaultParams(),
   pendingUnfollowDids: [], // Holds DIDs during confirmation modal
   missingScopes: [], // Required OAuth scopes this session wasn't granted (see scopes.js)
   hasLegacyScopes: false, // Session still holds broad scopes from before granular permissions

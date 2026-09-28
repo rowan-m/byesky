@@ -120,34 +120,46 @@ async function handleUndoUnfollow(dids, triggerBtn) {
     triggerBtn.disabled = true;
     triggerBtn.textContent = 'Re-following…';
   }
-  let restored = 0;
-  const failed = [];
-  for (const did of dids) {
-    try {
-      const data = await atprotoApi.followUser(state.agent, state.user.did, did);
-      const f = getFollowing(did);
-      if (f) f.followingUri = data.followingUri;
-      restored++;
-    } catch (err) {
-      failed.push({ did, error: err.message });
+  try {
+    const data = await atprotoApi.batchFollow(state.agent, state.user.did, dids);
+    const successes = data.success || [];
+    const failed = data.failed || [];
+
+    for (const item of successes) {
+      const f = getFollowing(item.did);
+      if (f) f.followingUri = item.followingUri;
     }
-  }
-  invalidateTableCache();
-  renderDashboard(false);
-  if (failed.length === 0) {
+
+    invalidateTableCache();
+    renderDashboard(false);
+
+    if (failed.length === 0) {
+      showActionToast({
+        message: `Re-followed ${successes.length} account${successes.length === 1 ? '' : 's'}.`,
+      });
+    } else {
+      const retryDids = failed.map((f) => f.did);
+      showActionToast({
+        message: `Re-followed ${successes.length}, ${failed.length} failed.`,
+        isError: true,
+        actions: [
+          {
+            label: 'Retry failed',
+            primary: true,
+            onClick: (btn) => handleUndoUnfollow(retryDids, btn),
+          },
+        ],
+      });
+    }
+  } catch (err) {
     showActionToast({
-      message: `Re-followed ${restored} account${restored === 1 ? '' : 's'}.`,
-    });
-  } else {
-    const retryDids = failed.map((f) => f.did);
-    showActionToast({
-      message: `Re-followed ${restored}, ${failed.length} failed.`,
+      message: `Couldn't re-follow: ${err.message || err}`,
       isError: true,
       actions: [
         {
-          label: 'Retry failed',
+          label: 'Retry',
           primary: true,
-          onClick: (btn) => handleUndoUnfollow(retryDids, btn),
+          onClick: (btn) => handleUndoUnfollow(dids, btn),
         },
       ],
     });

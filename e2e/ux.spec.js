@@ -314,3 +314,123 @@ test('SEO metadata, OpenGraph preview image, and JSON-LD structured data are pre
     expect(res.status(), `Expected 200 for ${assetPath}`).toBe(200);
   }
 });
+
+test('custom weights, filters, and thresholds persist across reloads and Reset defaults restores them', async ({
+  page,
+}) => {
+  if (page.viewportSize().width <= 1100) {
+    await page.locator('#config-toggle').click();
+  }
+
+  const resetBtn = page.locator('#reset-config-btn');
+  await expect(resetBtn).toBeHidden();
+
+  // Customize a weight, a filter, and a threshold parameter
+  await page.locator('#weight-not-following + .weight-seg .weight-seg-btn[data-value="5"]').click();
+  await page.locator('#filter-noisy').uncheck();
+  await page.locator('#param-inactive-days').fill('90');
+  await page.locator('#param-inactive-days').dispatchEvent('change');
+
+  await expect(resetBtn).toBeVisible();
+
+  // Reload the page and verify preferences are restored from localStorage
+  await page.reload();
+  await expect(page.locator('#table-body tr').first()).toBeVisible();
+
+  if (page.viewportSize().width <= 1100) {
+    await page.locator('#config-toggle').click();
+  }
+
+  await expect(
+    page.locator('#weight-not-following + .weight-seg .weight-seg-btn[data-value="5"]'),
+  ).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('#filter-noisy')).not.toBeChecked();
+  await expect(page.locator('#param-inactive-days')).toHaveValue('90');
+  await expect(resetBtn).toBeVisible();
+
+  // Click Reset defaults and verify everything returns to defaults
+  await resetBtn.click();
+  await expect(resetBtn).toBeHidden();
+  await expect(
+    page.locator('#weight-not-following + .weight-seg .weight-seg-btn[data-value="1"]'),
+  ).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('#filter-noisy')).toBeChecked();
+  await expect(page.locator('#param-inactive-days')).toHaveValue('180');
+});
+
+test('clicking a criterion badge or sidebar Only button solos that filter and clicking again restores filters', async ({
+  page,
+}) => {
+  const rows = page.locator('#table-body tr');
+  await expect(rows).toHaveCount(25);
+
+  // Click a NEVER POSTED badge in the table to solo-filter to neverPosted accounts
+  const neverPostedBadge = page
+    .locator('#table-body button.badge-filter[data-filter-key="neverPosted"]')
+    .first();
+  await neverPostedBadge.click();
+
+  await expect(page.locator('#config-summary')).toHaveText('Only: Never Posted');
+  const soloTotal = await rows.count();
+  expect(soloTotal).toBeGreaterThan(0);
+  expect(soloTotal).toBeLessThan(25);
+
+  // Every visible row should have the active solo badge
+  const activeBadges = page.locator(
+    '#table-body button.badge-filter[data-filter-key="neverPosted"].is-solo-filter',
+  );
+  await expect(activeBadges).toHaveCount(soloTotal);
+
+  // Clicking the active badge again restores all filters
+  await activeBadges.first().click();
+  await expect(page.locator('#config-summary')).toHaveText('All shown');
+  await expect(rows).toHaveCount(25);
+});
+
+test('batch unfollow Undo uses batchFollow in a single call', async ({ page }) => {
+  await page.locator('#table-body .row-checkbox').nth(0).check();
+  await page.locator('#table-body .row-checkbox').nth(1).check();
+  await page.locator('#batch-unfollow-btn').click();
+
+  const toast = page.locator('#action-toast');
+  await expect(toast).toContainText('Unfollowed 2 accounts.');
+
+  await toast.getByRole('button', { name: 'Undo' }).click();
+  await expect(toast).toContainText('Re-followed 2 accounts.');
+
+  const batchFollowCalls = await page.evaluate(() => window.__batchFollowCalls || []);
+  expect(batchFollowCalls).toHaveLength(1);
+  expect(batchFollowCalls[0]).toHaveLength(2);
+});
+
+test('Retry Incomplete header button and cancelled sync partial-results view work end-to-end', async ({
+  page,
+}) => {
+  // 1. Account with incomplete data shows Retry Incomplete (1) in the header
+  await mockSignedInApp(page, {
+    count: 10,
+    patches: { 0: { criteria: { unknown: ['activity'] } } },
+  });
+  await page.goto('/');
+  const retryIncompleteBtn = page.locator('#retry-incomplete-btn');
+  await expect(retryIncompleteBtn).toBeVisible();
+  await expect(page.locator('#incomplete-count')).toHaveText('1');
+
+  await retryIncompleteBtn.click();
+  const incompleteStarts = await page.evaluate(() => window.__incompleteSyncStarts || 0);
+  expect(incompleteStarts).toBe(1);
+
+  // 2. Cancelled sync with partial followings offers Resume Incomplete and View Partial Results
+  await mockSignedInApp(page, {
+    count: 8,
+    syncState: { status: 'cancelled', error: 'Synchronization aborted by user.' },
+  });
+  await page.goto('/');
+  await expect(page.locator('#sync-section')).toBeVisible();
+  await expect(page.locator('#resume-sync-btn')).toBeVisible();
+  await expect(page.locator('#view-partial-btn')).toBeVisible();
+
+  await page.locator('#view-partial-btn').click();
+  await expect(page.locator('#dashboard-section')).toBeVisible();
+  await expect(page.locator('#table-body tr')).toHaveCount(8);
+});

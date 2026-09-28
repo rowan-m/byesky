@@ -16,6 +16,7 @@ export const SCAN_LIMIT_LABEL = '2,500';
 export const CRITERIA = [
   {
     id: 'deletedBanned',
+    label: 'Deleted or Banned',
     defaultWeight: 4,
     filterId: 'filter-deleted-banned',
     weightId: 'weight-deleted-banned',
@@ -36,6 +37,7 @@ export const CRITERIA = [
   },
   {
     id: 'blocking',
+    label: 'Blocking Me',
     defaultWeight: 4,
     filterId: 'filter-blocking',
     weightId: 'weight-blocking',
@@ -50,6 +52,7 @@ export const CRITERIA = [
   },
   {
     id: 'neverPosted',
+    label: 'Never Posted',
     defaultWeight: 4,
     filterId: 'filter-never-posted',
     weightId: 'weight-never-posted',
@@ -63,6 +66,7 @@ export const CRITERIA = [
   },
   {
     id: 'inactive',
+    label: 'Inactive',
     defaultWeight: 3,
     filterId: 'filter-inactive',
     weightId: 'weight-inactive',
@@ -77,6 +81,7 @@ export const CRITERIA = [
   },
   {
     id: 'notFollowing',
+    label: 'Not Following Back',
     defaultWeight: 1,
     filterId: 'filter-not-following',
     weightId: 'weight-not-following',
@@ -90,6 +95,7 @@ export const CRITERIA = [
   },
   {
     id: 'noInbound',
+    label: 'No Inbound Contact',
     defaultWeight: 1,
     filterId: 'filter-no-inbound',
     weightId: 'weight-no-inbound',
@@ -104,6 +110,7 @@ export const CRITERIA = [
   },
   {
     id: 'noOutbound',
+    label: 'No Outbound Contact',
     defaultWeight: 5,
     filterId: 'filter-no-outbound',
     weightId: 'weight-no-outbound',
@@ -118,6 +125,7 @@ export const CRITERIA = [
   },
   {
     id: 'noisy',
+    label: 'Noisy Poster',
     defaultWeight: 1,
     filterId: 'filter-noisy',
     weightId: 'weight-noisy',
@@ -132,6 +140,7 @@ export const CRITERIA = [
   },
   {
     id: 'muted',
+    label: 'Muted Account',
     defaultWeight: 4,
     filterId: 'filter-muted',
     weightId: 'weight-muted',
@@ -145,6 +154,7 @@ export const CRITERIA = [
   },
   {
     id: 'massFollower',
+    label: 'Mass Follower',
     defaultWeight: 1,
     filterId: 'filter-mass-follower',
     weightId: 'weight-mass-follower',
@@ -159,6 +169,7 @@ export const CRITERIA = [
   },
   {
     id: 'spammyRatio',
+    label: 'Spammy Ratio',
     defaultWeight: 1,
     filterId: 'filter-spammy-ratio',
     weightId: 'weight-spammy-ratio',
@@ -172,6 +183,7 @@ export const CRITERIA = [
   },
   {
     id: 'flagged',
+    label: 'Moderation Flags',
     defaultWeight: 3,
     filterId: 'filter-flagged',
     weightId: 'weight-flagged',
@@ -185,6 +197,7 @@ export const CRITERIA = [
   },
   {
     id: 'lowFollowers',
+    label: 'Low Followers',
     defaultWeight: 0,
     filterId: 'filter-low-followers',
     weightId: 'weight-low-followers',
@@ -199,6 +212,7 @@ export const CRITERIA = [
   },
   {
     id: 'outlier',
+    label: '0 Mutuals (Outlier)',
     defaultWeight: 1,
     filterId: 'filter-outlier',
     weightId: 'weight-outlier',
@@ -214,15 +228,15 @@ export const CRITERIA = [
 
 /** Filters that aren't criteria: accounts that are OK, and accounts the user has locked or unfollowed. */
 export const EXTRA_FILTERS = [
-  { key: 'ok', filterId: 'filter-ok' },
-  { key: 'locked', filterId: 'filter-locked' },
-  { key: 'unfollowed', filterId: 'filter-unfollowed' },
+  { key: 'ok', label: 'OK / Clean', filterId: 'filter-ok' },
+  { key: 'locked', label: 'Locked', filterId: 'filter-locked' },
+  { key: 'unfollowed', label: 'Unfollowed', filterId: 'filter-unfollowed' },
 ];
 
 /** Every filter checkbox, keyed by its `state.filters` property. */
 export const FILTER_CONTROLS = [
   ...EXTRA_FILTERS,
-  ...CRITERIA.map(({ id, filterId }) => ({ key: id, filterId })),
+  ...CRITERIA.map(({ id, label, filterId }) => ({ key: id, label, filterId })),
 ];
 
 export function defaultWeights() {
@@ -235,7 +249,7 @@ export function defaultFilters() {
 }
 
 /**
- * The negative badges for an account, in display order, as `{ kind, title, label }`.
+ * The negative badges for an account, in display order, as `{ kind, title, label, filterKey }`.
  * Criteria that are unknown (null) or don't match produce nothing.
  */
 export function negativeBadges(item, params) {
@@ -244,7 +258,12 @@ export function negativeBadges(item, params) {
     if (item.evaluation.matches[criterion.id] !== true) continue;
     for (const b of criterion.badges) {
       if (b.when && !b.when(item)) continue;
-      out.push({ kind: b.kind, title: b.title(item, params), label: b.label });
+      out.push({
+        kind: b.kind,
+        title: b.title(item, params),
+        label: b.label,
+        filterKey: criterion.id,
+      });
     }
   }
   return out;

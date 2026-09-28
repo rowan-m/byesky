@@ -3,20 +3,24 @@ import { negativeBadges, SCAN_LIMIT_LABEL } from '../criteria.js';
 import {
   escapeHTML,
   filterAndSortFollowings,
+  isAccountIncomplete,
   sanitizeUrl,
   truncateText,
   UNKNOWN_SOURCE_LABELS,
 } from '../scoring.js';
 import { executeUnfollow, handleRefollow, triggerUndoAction } from './actions.js';
+import { getSoloFilterKey, toggleSoloFilter } from './config-panel.js';
 import {
   batchUnfollowBtn,
   confirmModal,
   dashboardSection,
   emptyState,
+  incompleteCountSpan,
   nextPageBtns,
   paginationInfos,
   paginationPagesList,
   prevPageBtns,
+  retryIncompleteBtn,
   selectAllCheckbox,
   selectedCountSpan,
   shortcutsLegend,
@@ -381,6 +385,12 @@ export function setupTableListeners() {
       const did = lockBtn.dataset.did;
       if (!did) return;
       await toggleLockForDid(did);
+      return;
+    }
+
+    const filterBadge = e.target.closest('.badge-filter');
+    if (filterBadge?.dataset.filterKey) {
+      toggleSoloFilter(filterBadge.dataset.filterKey);
     }
   });
 
@@ -453,7 +463,14 @@ export function getCurrentPageItems(list = getFilteredAndSortedList()) {
   return list.slice(startIdx, endIdx);
 }
 
-function badge(kind, title, label) {
+function badge(kind, title, label, filterKey = null) {
+  if (filterKey) {
+    const isSolo = getSoloFilterKey() === filterKey;
+    const hint = isSolo
+      ? `${title} — Click to restore all filters`
+      : `${title} — Click to show only ${label} accounts`;
+    return `<button type="button" class="badge badge-${kind} badge-filter ${isSolo ? 'is-solo-filter' : ''}" data-filter-key="${escapeHTML(filterKey)}" aria-pressed="${isSolo}" title="${escapeHTML(hint)}">${escapeHTML(label)}</button>`;
+  }
   return `<span class="badge badge-${kind}" title="${escapeHTML(title)}">${escapeHTML(label)}</span>`;
 }
 
@@ -466,10 +483,10 @@ function renderCriteriaBadges(item) {
   const out = [];
 
   if (item.isOk) {
-    out.push(badge('success', 'Nothing with a weight above 0 matches this account', 'OK'));
+    out.push(badge('success', 'Nothing with a weight above 0 matches this account', 'OK', 'ok'));
   } else {
     for (const b of negativeBadges(item, state.params)) {
-      out.push(badge(b.kind, b.title, b.label));
+      out.push(badge(b.kind, b.title, b.label, b.filterKey));
     }
   }
 
@@ -506,7 +523,7 @@ function renderCriteriaBadges(item) {
     out.push(
       badge(
         'info',
-        `Couldn't fetch ${what} for this account, so criteria that depend on it are skipped. Resync to try again.`,
+        `Couldn't fetch ${what} for this account, so criteria that depend on it are skipped. Click Retry Incomplete in the header to try again.`,
         'INCOMPLETE',
       ),
     );
@@ -610,8 +627,12 @@ export function renderDashboard(resetSelection = false) {
       const isLocked = state.lockedDids.has(item.did);
       if (isLocked) {
         badgesHTML =
-          '<span class="badge badge-locked" title="Protected: This account is locked and excluded from Select All and unfollowing">🔒 LOCKED</span>' +
-          badgesHTML;
+          badge(
+            'locked',
+            'Protected: This account is locked and excluded from Select All and unfollowing',
+            '🔒 LOCKED',
+            'locked',
+          ) + badgesHTML;
       }
 
       // Score color class (0-5 scale: high score represents strong reason to unfollow)
@@ -730,7 +751,7 @@ export function renderDashboard(resetSelection = false) {
         <td class="col-meta col-last-post ${isPostInactive ? 'criteria-highlight' : ''}" data-label="Last post">${escapeHTML(formatRelativeDate(item.criteria.lastPostDate))}</td>
         <td class="col-meta col-last-interaction ${isInteractionInactive ? 'criteria-highlight' : ''}" data-label="Last interaction">${cellContentHTML}</td>
         <td class="col-flags">
-          <div class="flags-list">${isUnfollowed ? '<span class="badge badge-secondary">Unfollowed</span>' : badgesHTML}</div>
+          <div class="flags-list">${isUnfollowed ? badge('secondary', 'Unfollowed account', 'Unfollowed', 'unfollowed') : badgesHTML}</div>
         </td>
         <td class="col-score score-cell ${scoreClass}">${escapeHTML(item.score)}</td>
       `;
@@ -802,6 +823,25 @@ export function renderDashboard(resetSelection = false) {
 
   renderCheckboxHeaders(pageItems);
   updateSelectedCounter();
+  updateIncompleteCounter();
+}
+
+export function countIncompleteFollowings(followings = state.followings) {
+  const includeSkippedMutuals = Boolean(state.sync?.mutualsSkipped);
+  let count = 0;
+  for (const item of followings) {
+    if (isAccountIncomplete(item, { includeSkippedMutuals })) count++;
+  }
+  return count;
+}
+
+export function updateIncompleteCounter() {
+  if (!retryIncompleteBtn || !incompleteCountSpan) return;
+  const count = countIncompleteFollowings();
+  incompleteCountSpan.textContent = String(count);
+  const inProgress = state.sync?.status === 'fetching' || state.sync?.status === 'enriching';
+  retryIncompleteBtn.classList.toggle('hidden', count === 0);
+  retryIncompleteBtn.disabled = inProgress || count === 0;
 }
 
 export function renderCheckboxHeaders(pageItems) {
