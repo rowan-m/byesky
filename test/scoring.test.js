@@ -44,6 +44,8 @@ const defaultParams = {
 
 const defaultFilters = {
   ok: true,
+  locked: true,
+  unfollowed: true,
   notFollowing: true,
   inactive: true,
   neverPosted: true,
@@ -232,6 +234,45 @@ test('Scoring & Sanitization Helpers', async (t) => {
     );
     assert.strictEqual(hiddenLocked.length, 1);
     assert.strictEqual(hiddenLocked[0].did, 'did:plc:clean');
+
+    // Verify unfollowed filtering: when filters.unfollowed is false, unfollowed accounts (followingUri == null) are hidden
+    const listWithUnfollowed = [
+      ...list,
+      {
+        did: 'did:plc:unfollowed',
+        handle: 'unfollowed.bsky.social',
+        displayName: 'Unfollowed User',
+        followingUri: null,
+        criteria: { ...list[0].criteria },
+      },
+    ];
+    const withUnfollowedShown = filterAndSortFollowings(
+      listWithUnfollowed,
+      {
+        searchQuery: '',
+        weights: defaultWeights,
+        filters: { ...defaultFilters, unfollowed: true },
+        params: defaultParams,
+        sorting: { col: 'score', order: 'desc' },
+      },
+      now,
+    );
+    assert.strictEqual(withUnfollowedShown.length, 3);
+    assert.ok(withUnfollowedShown.some((item) => item.did === 'did:plc:unfollowed'));
+
+    const withUnfollowedHidden = filterAndSortFollowings(
+      listWithUnfollowed,
+      {
+        searchQuery: '',
+        weights: defaultWeights,
+        filters: { ...defaultFilters, unfollowed: false },
+        params: defaultParams,
+        sorting: { col: 'score', order: 'desc' },
+      },
+      now,
+    );
+    assert.strictEqual(withUnfollowedHidden.length, 2);
+    assert.ok(!withUnfollowedHidden.some((item) => item.did === 'did:plc:unfollowed'));
   });
 
   await t.test('summariseAuthorActivity counts posts, replies and reposts', () => {

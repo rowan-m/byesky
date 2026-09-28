@@ -35,6 +35,10 @@ describe('criteria config', () => {
 
     const filters = defaultFilters();
     assert.equal(Object.keys(filters).length, CRITERIA.length + EXTRA_FILTERS.length);
+    assert.deepEqual(
+      EXTRA_FILTERS.map((f) => f.key),
+      ['ok', 'locked', 'unfollowed'],
+    );
     for (const { key } of FILTER_CONTROLS) {
       assert.equal(filters[key], true);
     }

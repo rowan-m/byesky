@@ -634,8 +634,8 @@ input[type='number']:focus {
 
 .status-toggles-bar {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
   margin-bottom: 10px;
 }
 
@@ -643,8 +643,9 @@ input[type='number']:focus {
   background-color: var(--bg-app);
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
-  padding: 5px 8px;
-  font-size: 0.775rem;
+  padding: 5px 6px;
+  font-size: 0.725rem;
+  white-space: nowrap;
 }
 
 .status-pill-ok {
@@ -655,6 +656,11 @@ input[type='number']:focus {
 .status-pill-locked {
   font-weight: 600;
   color: var(--primary);
+}
+
+.status-pill-unfollowed {
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
 .criteria-list {

@@ -21,6 +21,7 @@ test('explains itself and hides controls that only work in the syncing tab', asy
   await expect(page.locator('#sync-elsewhere')).toBeVisible();
   await expect(page.locator('#cancel-sync-btn')).toBeHidden();
   await expect(page.locator('#skip-mutuals')).toBeHidden();
+  await expect(page.locator('#resync-btn')).toBeDisabled();
   // The previous completed sync, not the one in progress.
   await expect(page.locator('#last-synced-time')).toContainText('Last synced');
 });
