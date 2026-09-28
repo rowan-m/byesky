@@ -534,6 +534,44 @@
                 <button id="batch-unfollow-btn" class="btn btn-danger hidden" disabled>
                   Unfollow Selected (<span id="selected-count">0</span>)
                 </button>
+                <button
+                  type="button"
+                  id="shortcuts-toggle-btn"
+                  class="btn btn-secondary btn-sm shortcuts-toggle-btn"
+                  aria-expanded="false"
+                  aria-controls="shortcuts-legend"
+                  title="Keyboard shortcuts (?)"
+                  aria-label="Keyboard shortcuts"
+                >
+                  <span aria-hidden="true">⌨️</span>
+                  <span class="shortcuts-toggle-label">Shortcuts</span>
+                  <kbd class="kbd-hint">?</kbd>
+                </button>
+              </div>
+            </div>
+
+            <!-- Keyboard Shortcuts Legend -->
+            <div
+              id="shortcuts-legend"
+              class="shortcuts-legend card hidden"
+              role="region"
+              aria-label="Keyboard shortcuts"
+            >
+              <div class="shortcuts-grid">
+                <span class="shortcut-item"
+                  ><kbd>↑</kbd><kbd>↓</kbd> <em>or</em> <kbd>J</kbd><kbd>K</kbd> <em>or</em>
+                  <kbd>W</kbd><kbd>S</kbd> Move row</span
+                >
+                <span class="shortcut-item"><kbd>Space</kbd> Select row</span>
+                <span class="shortcut-item"
+                  ><kbd>Shift</kbd>+<kbd>Click</kbd> / <kbd>↑</kbd><kbd>↓</kbd> Range select</span
+                >
+                <span class="shortcut-item"><kbd>L</kbd> Lock / unlock</span>
+                <span class="shortcut-item"><kbd>U</kbd> Unfollow / re-follow</span>
+                <span class="shortcut-item"><kbd>I</kbd> Inspect preview</span>
+                <span class="shortcut-item"><kbd>O</kbd> Open profile</span>
+                <span class="shortcut-item"><kbd>Z</kbd> Undo unfollow</span>
+                <span class="shortcut-item"><kbd>[</kbd> <kbd>]</kbd> Prev / next page</span>
               </div>
             </div>
 
@@ -575,7 +613,6 @@
                     <th class="sortable text-center" data-sort="score" aria-sort="descending">
                       <button type="button" class="sort-btn">Score</button>
                     </th>
-                    <th class="col-action text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody id="table-body">

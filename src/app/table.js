@@ -7,9 +7,11 @@ import {
   truncateText,
   UNKNOWN_SOURCE_LABELS,
 } from '../scoring.js';
-import { executeUnfollow, handleRefollow } from './actions.js';
+import { executeUnfollow, handleRefollow, triggerUndoAction } from './actions.js';
 import {
   batchUnfollowBtn,
+  confirmModal,
+  dashboardSection,
   emptyState,
   nextPageBtns,
   paginationInfos,
@@ -17,11 +19,14 @@ import {
   prevPageBtns,
   selectAllCheckbox,
   selectedCountSpan,
+  shortcutsLegend,
+  shortcutsToggleBtn,
   tableBody,
   tableSearch,
 } from './dom.js';
 import { formatCount, formatMutualsCount, formatRelativeDate } from './format.js';
-import { state } from './state.js';
+import { syncOpenPreview, togglePreviewForItem } from './preview.js';
+import { getFollowing, state } from './state.js';
 
 const FOCUSABLE_ROW_SELECTORS = [
   '.row-checkbox',
@@ -61,6 +66,261 @@ function scrollToTop() {
   window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
 }
 
+function findRowElement(did) {
+  if (!did || !tableBody) return null;
+  for (const tr of tableBody.querySelectorAll('tr[data-did]')) {
+    if (tr.dataset.did === did) return tr;
+  }
+  return null;
+}
+
+export function setActiveRow(did, { scroll = false, syncPreview = false } = {}) {
+  state.activeDid = did || null;
+  const pageItems = getCurrentPageItems();
+  const idx = pageItems.findIndex((item) => item.did === state.activeDid);
+  if (idx !== -1) {
+    state.activeRowIndex = idx;
+  }
+
+  let activeTr = null;
+  for (const tr of tableBody.querySelectorAll('tr[data-did]')) {
+    const isMatch = tr.dataset.did === state.activeDid;
+    tr.classList.toggle('active-row', isMatch);
+    if (isMatch) activeTr = tr;
+  }
+
+  if (scroll && activeTr) {
+    activeTr.scrollIntoView({ block: 'nearest' });
+  }
+  if (syncPreview) {
+    syncOpenPreview(state.activeDid ? getFollowing(state.activeDid) : null);
+  }
+}
+
+function resolveOrInitActiveItem() {
+  const pageItems = getCurrentPageItems();
+  if (pageItems.length === 0) return null;
+  const existing = pageItems.find((item) => item.did === state.activeDid);
+  if (existing) return existing;
+  setActiveRow(pageItems[0].did, { scroll: true });
+  return pageItems[0];
+}
+
+async function toggleLockForDid(did) {
+  if (!did) return;
+  if (state.lockedDids.has(did)) {
+    state.lockedDids.delete(did);
+  } else {
+    state.lockedDids.add(did);
+    state.selectedDids.delete(did);
+  }
+  if (state.user) {
+    await syncCache.setLockedDids(state.user.did, Array.from(state.lockedDids));
+  }
+  renderDashboard(false);
+}
+
+function applyRowSelection(did, selected) {
+  if (!did || state.lockedDids.has(did)) return;
+  const item = getFollowing(did);
+  if (!item || !item.followingUri) return;
+  if (selected) {
+    state.selectedDids.add(did);
+  } else {
+    state.selectedDids.delete(did);
+  }
+  const tr = findRowElement(did);
+  if (tr) {
+    tr.classList.toggle('selected-row', selected);
+    const cb = tr.querySelector('.row-checkbox');
+    if (cb) cb.checked = selected;
+  }
+}
+
+function applyRangeSelection(fromDid, toDid, targetSelected) {
+  const pageItems = getCurrentPageItems();
+  const fromIdx = pageItems.findIndex((item) => item.did === fromDid);
+  const toIdx = pageItems.findIndex((item) => item.did === toDid);
+  if (fromIdx === -1 || toIdx === -1) {
+    applyRowSelection(toDid, targetSelected);
+    return;
+  }
+  const start = Math.min(fromIdx, toIdx);
+  const end = Math.max(fromIdx, toIdx);
+  for (let i = start; i <= end; i++) {
+    applyRowSelection(pageItems[i].did, targetSelected);
+  }
+}
+
+function toggleShortcutsLegend() {
+  if (!shortcutsLegend || !shortcutsToggleBtn) return;
+  const isHidden = shortcutsLegend.classList.toggle('hidden');
+  shortcutsToggleBtn.setAttribute('aria-expanded', String(!isHidden));
+}
+
+function isKeyboardShortcutBlocked(e) {
+  if (!dashboardSection || dashboardSection.classList.contains('hidden')) return true;
+  if (e.ctrlKey || e.metaKey || e.altKey) return true;
+  if (confirmModal?.open) return true;
+  if (document.documentElement.classList.contains('is-config-overlay')) return true;
+  const target = e.target;
+  if (!target || typeof target.matches !== 'function') return false;
+  return target.matches('input:not([type="checkbox"]), textarea, select, [contenteditable="true"]');
+}
+
+async function handleTableKeydown(e) {
+  if (isKeyboardShortcutBlocked(e)) return;
+
+  const key = e.key;
+  if (key === '?') {
+    e.preventDefault();
+    toggleShortcutsLegend();
+    return;
+  }
+
+  if (key === 'z' || key === 'Z') {
+    if (triggerUndoAction()) {
+      e.preventDefault();
+    }
+    return;
+  }
+
+  if (key === '[') {
+    if (state.pagination.currentPage > 1) {
+      e.preventDefault();
+      state.pagination.currentPage--;
+      state.activeDid = null;
+      state.activeRowIndex = 0;
+      renderDashboard(false);
+      scrollToTop();
+    }
+    return;
+  }
+
+  if (key === ']') {
+    const totalPages = Math.ceil(getFilteredAndSortedList().length / state.pagination.pageSize);
+    if (state.pagination.currentPage < totalPages) {
+      e.preventDefault();
+      state.pagination.currentPage++;
+      state.activeDid = null;
+      state.activeRowIndex = 0;
+      renderDashboard(false);
+      scrollToTop();
+    }
+    return;
+  }
+
+  const isDown = key === 'ArrowDown' || key === 'j' || key === 'J' || key === 's' || key === 'S';
+  const isUp = key === 'ArrowUp' || key === 'k' || key === 'K' || key === 'w' || key === 'W';
+
+  if (isDown || isUp) {
+    const pageItems = getCurrentPageItems();
+    if (pageItems.length === 0) return;
+    e.preventDefault();
+
+    const curIdx = pageItems.findIndex((item) => item.did === state.activeDid);
+    let nextIdx;
+    if (curIdx === -1) {
+      nextIdx = 0;
+    } else if (isDown) {
+      nextIdx = Math.min(pageItems.length - 1, curIdx + 1);
+    } else {
+      nextIdx = Math.max(0, curIdx - 1);
+    }
+
+    if (e.shiftKey) {
+      const startDid = pageItems[curIdx >= 0 ? curIdx : 0].did;
+      const nextDid = pageItems[nextIdx].did;
+      applyRangeSelection(startDid, nextDid, true);
+      state.lastSelectedDid = nextDid;
+      updateSelectedCounter();
+      renderCheckboxHeaders(pageItems);
+    }
+
+    // If focus was inside another row's control, blur it so Space acts on the new active row.
+    if (
+      document.activeElement &&
+      tableBody.contains(document.activeElement) &&
+      document.activeElement.closest('tr[data-did]')?.dataset.did !== pageItems[nextIdx].did
+    ) {
+      document.activeElement.blur();
+    }
+
+    setActiveRow(pageItems[nextIdx].did, { scroll: true, syncPreview: true });
+    return;
+  }
+
+  if (key === ' ') {
+    // Allow native Space activation on interactive controls outside the table body,
+    // except when the preview sheet is open (where focus is inside #preview-sheet).
+    if (
+      e.target &&
+      typeof e.target.matches === 'function' &&
+      e.target.matches('button, a[href], summary, input[type="checkbox"]') &&
+      !tableBody.contains(e.target) &&
+      !e.target.closest('#preview-sheet')
+    ) {
+      return;
+    }
+    const activeItem = resolveOrInitActiveItem();
+    if (!activeItem) return;
+    e.preventDefault();
+    if (!activeItem.followingUri || state.lockedDids.has(activeItem.did)) return;
+    const nextSelected = !state.selectedDids.has(activeItem.did);
+    applyRowSelection(activeItem.did, nextSelected);
+    state.lastSelectedDid = activeItem.did;
+    updateSelectedCounter();
+    renderCheckboxHeaders(getCurrentPageItems());
+    return;
+  }
+
+  if (key === 'l' || key === 'L') {
+    const activeItem = resolveOrInitActiveItem();
+    if (!activeItem || !activeItem.followingUri) return;
+    e.preventDefault();
+    await toggleLockForDid(activeItem.did);
+    syncOpenPreview(state.activeDid ? getFollowing(state.activeDid) : null);
+    return;
+  }
+
+  if (key === 'u' || key === 'U') {
+    const activeItem = resolveOrInitActiveItem();
+    if (!activeItem) return;
+    e.preventDefault();
+    const rowEl = findRowElement(activeItem.did);
+    if (!activeItem.followingUri) {
+      const refollowBtn = rowEl?.querySelector('.refollow-single-btn');
+      if (refollowBtn?.disabled) return;
+      await handleRefollow(activeItem.did, activeItem.handle, refollowBtn);
+    } else if (!state.lockedDids.has(activeItem.did)) {
+      const unfollowBtn = rowEl?.querySelector('.unfollow-single-btn');
+      if (unfollowBtn?.disabled) return;
+      await executeUnfollow([activeItem.did], unfollowBtn);
+    }
+    syncOpenPreview(state.activeDid ? getFollowing(state.activeDid) : null);
+    return;
+  }
+
+  if (key === 'i' || key === 'I') {
+    const activeItem = resolveOrInitActiveItem();
+    if (!activeItem) return;
+    e.preventDefault();
+    togglePreviewForItem(activeItem);
+    return;
+  }
+
+  if (key === 'o' || key === 'O') {
+    const activeItem = resolveOrInitActiveItem();
+    if (!activeItem) return;
+    e.preventDefault();
+    window.open(
+      `https://bsky.app/profile/${encodeURIComponent(activeItem.handle)}`,
+      '_blank',
+      'noopener,noreferrer',
+    );
+  }
+}
+
 export function setupTableListeners() {
   // Search input with basic debounce
   let searchTimeout;
@@ -73,11 +333,35 @@ export function setupTableListeners() {
     }, 200);
   });
 
+  // Shortcuts legend toggle button
+  shortcutsToggleBtn?.addEventListener('click', toggleShortcutsLegend);
+
+  // Global keyboard navigation & triage shortcuts
+  document.addEventListener('keydown', handleTableKeydown);
+
   // Select All checkbox
   selectAllCheckbox.addEventListener('change', handleSelectAllToggle);
 
   // Delegated row controls on tableBody (single listener instead of 400+ per render)
   tableBody.addEventListener('click', async (e) => {
+    const rowEl = e.target.closest('tr[data-did]');
+    if (rowEl?.dataset.did) {
+      setActiveRow(rowEl.dataset.did);
+    }
+
+    const checkbox = e.target.closest('.row-checkbox');
+    if (checkbox) {
+      const did = checkbox.dataset.did;
+      if (!did || state.lockedDids.has(did)) return;
+      if (e.shiftKey && state.lastSelectedDid && state.lastSelectedDid !== did) {
+        applyRangeSelection(state.lastSelectedDid, did, checkbox.checked);
+        updateSelectedCounter();
+        renderCheckboxHeaders(getCurrentPageItems());
+      }
+      state.lastSelectedDid = did;
+      return;
+    }
+
     const refollowBtn = e.target.closest('.refollow-single-btn');
     if (refollowBtn) {
       await handleRefollow(refollowBtn.dataset.did, refollowBtn.dataset.handle, refollowBtn);
@@ -96,16 +380,7 @@ export function setupTableListeners() {
     if (lockBtn) {
       const did = lockBtn.dataset.did;
       if (!did) return;
-      if (state.lockedDids.has(did)) {
-        state.lockedDids.delete(did);
-      } else {
-        state.lockedDids.add(did);
-        state.selectedDids.delete(did);
-      }
-      if (state.user) {
-        await syncCache.setLockedDids(state.user.did, Array.from(state.lockedDids));
-      }
-      renderDashboard(false);
+      await toggleLockForDid(did);
     }
   });
 
@@ -114,12 +389,8 @@ export function setupTableListeners() {
     if (!checkbox) return;
     const did = checkbox.dataset.did;
     if (!did || state.lockedDids.has(did)) return;
-    if (checkbox.checked) {
-      state.selectedDids.add(did);
-    } else {
-      state.selectedDids.delete(did);
-    }
-    checkbox.closest('tr')?.classList.toggle('selected-row', checkbox.checked);
+    applyRowSelection(did, checkbox.checked);
+    state.lastSelectedDid = did;
     updateSelectedCounter();
     renderCheckboxHeaders(getCurrentPageItems());
   });
@@ -143,6 +414,8 @@ export function setupTableListeners() {
     btn.addEventListener('click', () => {
       if (state.pagination.currentPage > 1) {
         state.pagination.currentPage--;
+        state.activeDid = null;
+        state.activeRowIndex = 0;
         renderDashboard(false);
         scrollToTop();
       }
@@ -154,6 +427,8 @@ export function setupTableListeners() {
       const totalPages = Math.ceil(getFilteredAndSortedList().length / state.pagination.pageSize);
       if (state.pagination.currentPage < totalPages) {
         state.pagination.currentPage++;
+        state.activeDid = null;
+        state.activeRowIndex = 0;
         renderDashboard(false);
         scrollToTop();
       }
@@ -301,6 +576,22 @@ export function renderDashboard(resetSelection = false) {
   const endIdx = Math.min(startIdx + state.pagination.pageSize, totalCount);
   const pageItems = list.slice(startIdx, endIdx);
 
+  // Reconcile active row cursor: if the active row was removed from the current view
+  // (e.g. unfollowed while the Unfollowed filter is off), keep the cursor at the same row index.
+  if (pageItems.length === 0) {
+    state.activeDid = null;
+    state.activeRowIndex = 0;
+  } else if (state.activeDid !== null) {
+    const existingIdx = pageItems.findIndex((item) => item.did === state.activeDid);
+    if (existingIdx !== -1) {
+      state.activeRowIndex = existingIdx;
+    } else {
+      const clampedIdx = Math.min(Math.max(0, state.activeRowIndex), pageItems.length - 1);
+      state.activeRowIndex = clampedIdx;
+      state.activeDid = pageItems[clampedIdx].did;
+    }
+  }
+
   const focusedTarget = captureFocusedRowControl();
 
   // Render Table rows
@@ -342,6 +633,9 @@ export function renderDashboard(resetSelection = false) {
         row.classList.add('locked-row');
       } else if (state.selectedDids.has(item.did)) {
         row.classList.add('selected-row');
+      }
+      if (item.did === state.activeDid) {
+        row.classList.add('active-row');
       }
 
       const isLowFollowers = item.evaluation.matches.lowFollowers === true;
@@ -387,9 +681,13 @@ export function renderDashboard(resetSelection = false) {
       const displayNameHTML = truncateText(item.displayName || item.handle.split('.')[0], 16);
       const handleHTML = truncateText('@' + item.handle, 20);
 
-      let checkboxHTML;
+      let controlsHTML;
       if (isUnfollowed) {
-        checkboxHTML = '<span class="text-muted text-center unfollowed-dash">—</span>';
+        controlsHTML = `
+          <div class="cell-controls is-unfollowed">
+            <button type="button" class="btn btn-primary btn-sm refollow-single-btn" data-did="${safeDid}" data-handle="${safeHandle}" title="Re-follow account (U)" aria-label="Re-follow ${safeLabelName}">↩️ Re-follow</button>
+          </div>
+        `;
       } else {
         const checkedAttr = !isLocked && state.selectedDids.has(item.did) ? 'checked' : '';
         const disabledAttr = isLocked ? 'disabled' : '';
@@ -400,26 +698,21 @@ export function renderDashboard(resetSelection = false) {
           ? 'Unlock account (allow selection and unfollowing)'
           : 'Lock account (protect from Select All and unfollowing)';
         const lockActionLabel = `${isLocked ? 'Unlock' : 'Lock'} ${safeLabelName}`;
+        const unfollowTitle = isLocked ? 'Unlock account to unfollow' : 'Unfollow account (U)';
+        const unfollowDisabledAttr = isLocked ? 'disabled' : '';
 
-        checkboxHTML = `
+        controlsHTML = `
           <div class="cell-controls">
             <input type="checkbox" class="row-checkbox" data-did="${safeDid}" ${checkedAttr} ${disabledAttr} aria-label="${checkboxLabel}">
             <button type="button" class="lock-toggle-btn ${isLocked ? 'is-locked' : ''}" data-did="${safeDid}" title="${lockTitle}" aria-label="${lockActionLabel}" aria-pressed="${isLocked}">${isLocked ? '🔒' : '🔓'}</button>
+            <button type="button" class="unfollow-single-btn" data-did="${safeDid}" data-handle="${safeHandle}" ${unfollowDisabledAttr} title="${unfollowTitle}" aria-label="Unfollow ${safeLabelName}">👋</button>
           </div>
         `;
       }
 
-      const unfollowDisabledAttr = isLocked ? 'disabled title="Unlock account to unfollow"' : '';
-      let actionButtonHTML;
-      if (isUnfollowed) {
-        actionButtonHTML = `<button class="btn btn-primary btn-sm refollow-single-btn" data-did="${safeDid}" data-handle="${safeHandle}" aria-label="Re-follow ${safeLabelName}">Re-follow</button>`;
-      } else {
-        actionButtonHTML = `<button class="btn btn-secondary btn-sm unfollow-single-btn" data-did="${safeDid}" data-handle="${safeHandle}" ${unfollowDisabledAttr} aria-label="Unfollow ${safeLabelName}">Unfollow</button>`;
-      }
-
       row.innerHTML = `
         <td class="col-checkbox">
-          ${checkboxHTML}
+          ${controlsHTML}
         </td>
         <td class="col-profile">
           <div class="profile-cell">
@@ -440,9 +733,6 @@ export function renderDashboard(resetSelection = false) {
           <div class="flags-list">${isUnfollowed ? '<span class="badge badge-secondary">Unfollowed</span>' : badgesHTML}</div>
         </td>
         <td class="col-score score-cell ${scoreClass}">${escapeHTML(item.score)}</td>
-        <td class="col-action text-right">
-          ${actionButtonHTML}
-        </td>
       `;
 
       tableBody.appendChild(row);
@@ -493,6 +783,8 @@ export function renderDashboard(resetSelection = false) {
       }
       pageBtn.addEventListener('click', () => {
         state.pagination.currentPage = i;
+        state.activeDid = null;
+        state.activeRowIndex = 0;
         renderDashboard(false);
         scrollToTop();
       });

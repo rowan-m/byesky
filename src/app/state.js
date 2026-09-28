@@ -16,6 +16,9 @@ export const state = {
   followingsByDid: new Map(), // O(1) lookup by DID
   selectedDids: new Set(), // DIDs marked for unfollowing
   lockedDids: new Set(), // DIDs protected from Select All and unfollowing
+  activeDid: null, // Active row cursor for keyboard navigation
+  activeRowIndex: 0, // Fallback row index when activeDid is hidden by a filter
+  lastSelectedDid: null, // Anchor DID for Shift+Click / Shift+Up/Down range selection
   pagination: {
     currentPage: 1,
     pageSize: 100,

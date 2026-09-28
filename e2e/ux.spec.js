@@ -120,15 +120,145 @@ test('unfollowed filter toggles visibility of unfollowed accounts', async ({ pag
   const unfollowedRow = page.locator(`#table-body tr[data-did="${did}"]`);
   await expect(unfollowedRow).toBeVisible();
   await expect(unfollowedRow).toHaveClass(/unfollowed-row/);
+  await expect(unfollowedRow.locator('.col-checkbox .refollow-single-btn')).toBeVisible();
+
+  if (page.viewportSize().width <= 1100) {
+    await page.locator('#config-toggle').click();
+  }
 
   // Uncheck "Unfollowed" filter to hide it
   const unfollowedFilter = page.locator('#filter-unfollowed');
   await unfollowedFilter.uncheck();
+  if (page.viewportSize().width <= 1100) {
+    await page.keyboard.press('Escape');
+  }
   await expect(unfollowedRow).toBeHidden();
 
   // Re-check "Unfollowed" filter to restore visibility
+  if (page.viewportSize().width <= 1100) {
+    await page.locator('#config-toggle').click();
+  }
   await unfollowedFilter.check();
+  if (page.viewportSize().width <= 1100) {
+    await page.keyboard.press('Escape');
+  }
   await expect(unfollowedRow).toBeVisible();
+});
+
+test('grouped row controls live in .col-checkbox and keyboard triage shortcuts work end-to-end', async ({
+  page,
+}) => {
+  // No right-hand Action column
+  await expect(page.locator('th.col-action, td.col-action')).toHaveCount(0);
+
+  const rows = page.locator('#table-body tr');
+  const firstRow = rows.nth(0);
+  const secondRow = rows.nth(1);
+  const thirdRow = rows.nth(2);
+
+  // Select, lock, and unfollow controls are grouped inside .col-checkbox
+  await expect(firstRow.locator('.col-checkbox .row-checkbox')).toBeVisible();
+  await expect(firstRow.locator('.col-checkbox .lock-toggle-btn')).toBeVisible();
+  await expect(firstRow.locator('.col-checkbox .unfollow-single-btn')).toHaveText('👋');
+
+  // Toggle keyboard shortcuts legend with ?
+  const legend = page.locator('#shortcuts-legend');
+  await expect(legend).toBeHidden();
+  await page.keyboard.press('?');
+  await expect(legend).toBeVisible();
+  await page.keyboard.press('?');
+  await expect(legend).toBeHidden();
+
+  // Navigate rows with J/K, W/S, and ArrowDown/ArrowUp
+  await page.keyboard.press('j');
+  await expect(firstRow).toHaveClass(/active-row/);
+
+  await page.keyboard.press('s');
+  await expect(secondRow).toHaveClass(/active-row/);
+
+  await page.keyboard.press('ArrowDown');
+  await expect(thirdRow).toHaveClass(/active-row/);
+
+  await page.keyboard.press('w');
+  await expect(secondRow).toHaveClass(/active-row/);
+
+  await page.keyboard.press('k');
+  await expect(firstRow).toHaveClass(/active-row/);
+
+  // Space selects the active row; Shift+ArrowDown range-selects the next row
+  await page.keyboard.press(' ');
+  await expect(firstRow).toHaveClass(/selected-row/);
+  await expect(page.locator('#selected-count')).toHaveText('1');
+
+  await page.keyboard.press('Shift+ArrowDown');
+  await expect(secondRow).toHaveClass(/active-row/);
+  await expect(secondRow).toHaveClass(/selected-row/);
+  await expect(page.locator('#selected-count')).toHaveText('2');
+
+  // L locks the active row (secondRow), clearing its selection and disabling its unfollow button
+  await page.keyboard.press('l');
+  await expect(secondRow).toHaveClass(/locked-row/);
+  await expect(secondRow.locator('.unfollow-single-btn')).toBeDisabled();
+  await expect(page.locator('#selected-count')).toHaveText('1');
+
+  // L again unlocks it
+  await page.keyboard.press('l');
+  await expect(secondRow).not.toHaveClass(/locked-row/);
+  await expect(secondRow.locator('.unfollow-single-btn')).toBeEnabled();
+
+  // U unfollows the active row and swaps in the Re-follow pill in .col-checkbox; Z undoes it
+  await page.keyboard.press('u');
+  await expect(secondRow).toHaveClass(/unfollowed-row/);
+  await expect(secondRow.locator('.col-checkbox .refollow-single-btn')).toBeVisible();
+  await page.keyboard.press('z');
+  await expect(secondRow).not.toHaveClass(/unfollowed-row/);
+  await expect(secondRow.locator('.col-checkbox .unfollow-single-btn')).toBeVisible();
+
+  // I opens the preview sheet for the active row, and J live-updates the preview to the next row
+  const secondDid = await secondRow.getAttribute('data-did');
+  const thirdDid = await thirdRow.getAttribute('data-did');
+  const secondName = await secondRow.locator('.display-name').innerText();
+  const thirdName = await thirdRow.locator('.display-name').innerText();
+  await page.keyboard.press('i');
+  const previewSheet = page.locator('#preview-sheet');
+  await expect(previewSheet).toBeVisible();
+  await expect(previewSheet).toHaveAttribute('data-did', secondDid);
+  await expect(previewSheet).toContainText(secondName);
+
+  await page.keyboard.press('j');
+  await expect(thirdRow).toHaveClass(/active-row/);
+  await expect(previewSheet).toHaveAttribute('data-did', thirdDid);
+  await expect(previewSheet).toContainText(thirdName);
+
+  await page.keyboard.press('Escape');
+  await expect(previewSheet).toBeHidden();
+});
+
+test('when Unfollowed filter is off, unfollowing with U keeps cursor at the same row index', async ({
+  page,
+}) => {
+  if (page.viewportSize().width <= 1100) {
+    await page.locator('#config-toggle').click();
+  }
+  await page.locator('#filter-unfollowed').uncheck();
+  if (page.viewportSize().width <= 1100) {
+    await page.keyboard.press('Escape');
+  }
+
+  const rows = page.locator('#table-body tr');
+  const secondDidBefore = await rows.nth(1).getAttribute('data-did');
+  const thirdDidBefore = await rows.nth(2).getAttribute('data-did');
+
+  // Move cursor to row index 1 (second row)
+  await page.keyboard.press('j');
+  await page.keyboard.press('j');
+  await expect(rows.nth(1)).toHaveAttribute('data-did', secondDidBefore);
+  await expect(rows.nth(1)).toHaveClass(/active-row/);
+
+  // Press U: secondDidBefore is unfollowed and hidden; thirdDidBefore slides into index 1 and stays active
+  await page.keyboard.press('u');
+  await expect(rows.nth(1)).toHaveAttribute('data-did', thirdDidBefore);
+  await expect(rows.nth(1)).toHaveClass(/active-row/);
 });
 
 test('malformed percent in OAuth error query parameter does not crash startup', async ({

@@ -302,7 +302,11 @@ async function hydratePreview(rawItem) {
       rawItem.description = enriched.description ?? '';
       rawItem.preview = enriched.preview;
       rawItem._previewHydrated = true;
-      if (enriched.mutualsCount !== undefined && rawItem.criteria) {
+      if (
+        enriched.mutualsCount !== undefined &&
+        rawItem.criteria &&
+        rawItem.criteria.mutualsCount === undefined
+      ) {
         rawItem.criteria.mutualsCount = enriched.mutualsCount;
         rawItem.criteria.hasMoreMutuals = enriched.hasMoreMutuals;
         invalidateTableCache();
@@ -361,6 +365,43 @@ async function showPreviewSheet(item) {
       }
     } catch (err) {
       console.warn('Could not lazily hydrate preview sheet:', err);
+    }
+  }
+}
+
+export function togglePreviewForItem(item) {
+  if (!item) return;
+  const sheet = document.getElementById('preview-sheet');
+  if (sheet?.open && sheet.dataset.did === item.did) {
+    sheet.close();
+    return;
+  }
+  hideHoverCardImmediately();
+  showPreviewSheet(item);
+}
+
+/**
+ * When an account preview (sheet or hover card) is already open and the user steps to a new
+ * active row via keyboard shortcuts, live-updates the open preview to show the new account.
+ */
+export function syncOpenPreview(item) {
+  const sheet = document.getElementById('preview-sheet');
+  if (!item) {
+    if (sheet?.open) sheet.close();
+    hideHoverCardImmediately();
+    return;
+  }
+  if (sheet?.open) {
+    showPreviewSheet(item);
+    return;
+  }
+  if (hoverCard && !hoverCard.classList.contains('hidden') && tableBody) {
+    for (const tr of tableBody.querySelectorAll('tr[data-did]')) {
+      if (tr.dataset.did === item.did) {
+        const profileCell = tr.querySelector('.profile-cell');
+        if (profileCell) showHoverCard(item, profileCell);
+        break;
+      }
     }
   }
 }
