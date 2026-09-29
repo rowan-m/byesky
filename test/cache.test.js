@@ -257,7 +257,7 @@ test('UserSyncCache IndexedDB persistence, coalescing, migration, and reload', a
       await cache.clear(did);
       assert.strictEqual(idb.records.has(did), false);
       assert.deepStrictEqual(await cache.getLockedDids(did), ['did:plc:keep']);
-      assert.deepStrictEqual(JSON.parse(storage.getItem(`byesky_locked_${did}`)), ['did:plc:keep']);
+      assert.deepStrictEqual(JSON.parse(storage.getItem(`nimbye_locked_${did}`)), ['did:plc:keep']);
     },
   );
 

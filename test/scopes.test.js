@@ -86,7 +86,7 @@ test('OAuth scopes', async (t) => {
     const metadata = buildClientMetadata('https://example.test');
     assert.deepStrictEqual(metadata, {
       client_id: 'https://example.test/client-metadata.json',
-      client_name: 'ByeSky',
+      client_name: 'Nimbye',
       client_uri: 'https://example.test',
       logo_uri: 'https://example.test/icon.png',
       redirect_uris: ['https://example.test/'],

@@ -96,7 +96,7 @@ function syncStep(id) {
   return { id, index: index + 1, total: SYNC_STEPS.length, label: SYNC_STEPS[index].label };
 }
 
-const LOCK_PREFIX = 'byesky-sync:';
+const LOCK_PREFIX = 'nimbye-sync:';
 const OTHER_TAB_POLL_MS = 2000;
 
 // The run in progress in this tab, per account: { controller, promise }.

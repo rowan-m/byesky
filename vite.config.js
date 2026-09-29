@@ -14,12 +14,12 @@ function productionHeaders() {
 
 // Origin the production build is served from. PR preview deploys rewrite this origin in
 // the generated file to the preview channel's URL.
-const SITE_ORIGIN = process.env.SITE_ORIGIN || 'https://bye-sky.web.app';
+const SITE_ORIGIN = process.env.SITE_ORIGIN || 'https://nimbye.web.app';
 
 /** Emits client-metadata.json from the same source the OAuth client uses at runtime. */
 function clientMetadataPlugin() {
   return {
-    name: 'byesky-client-metadata',
+    name: 'nimbye-client-metadata',
     apply: 'build',
     generateBundle() {
       this.emitFile({

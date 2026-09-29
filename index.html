@@ -3,34 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ByeSky — Clean up who you follow on Bluesky</title>
+    <title>Nimbye — Clean up who you follow on Bluesky</title>
     <meta
       name="description"
       content="Spot inactive, muted, or one-way Bluesky accounts. Score by real interactions, lock favourites, and unfollow in bulk."
     />
-    <meta name="application-name" content="ByeSky" />
+    <meta name="application-name" content="Nimbye" />
     <meta name="author" content="Rowan Merewood" />
     <meta name="theme-color" content="#0066cc" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0b0f19" media="(prefers-color-scheme: dark)" />
-    <link rel="canonical" href="https://bye-sky.web.app/" />
+    <link rel="canonical" href="https://nimbye.web.app/" />
 
     <!-- OpenGraph / Bluesky / Social Sharing -->
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="ByeSky" />
+    <meta property="og:site_name" content="Nimbye" />
     <meta property="og:locale" content="en_GB" />
-    <meta property="og:url" content="https://bye-sky.web.app/" />
-    <meta property="og:title" content="ByeSky — Clean up who you follow on Bluesky" />
+    <meta property="og:url" content="https://nimbye.web.app/" />
+    <meta property="og:title" content="Nimbye — Clean up who you follow on Bluesky" />
     <meta
       property="og:description"
       content="Spot inactive, muted, or one-way Bluesky accounts. Score by real interactions, lock favourites, and unfollow in bulk."
     />
-    <meta property="og:image" content="https://bye-sky.web.app/og-image.png" />
+    <meta property="og:image" content="https://nimbye.web.app/og-image.png" />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="ByeSky dashboard showing custom scoring weights, criteria badges, and grouped select, lock, and unfollow controls for Bluesky accounts."
+      content="Nimbye dashboard showing custom scoring weights, criteria badges, and grouped select, lock, and unfollow controls for Bluesky accounts."
     />
 
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
@@ -43,10 +43,10 @@
       {
         "@context": "https://schema.org",
         "@type": "WebApplication",
-        "name": "ByeSky",
+        "name": "Nimbye",
         "headline": "Clean up who you follow on Bluesky",
-        "url": "https://bye-sky.web.app/",
-        "image": "https://bye-sky.web.app/og-image.png",
+        "url": "https://nimbye.web.app/",
+        "image": "https://nimbye.web.app/og-image.png",
         "description": "Spot inactive, muted, or one-way Bluesky accounts. Score by real interactions, lock favourites, and unfollow in bulk.",
         "applicationCategory": "UtilitiesApplication",
         "operatingSystem": "Any",
@@ -77,7 +77,7 @@
   <body>
     <header class="app-header">
       <div class="header-container">
-        <h1 class="logo"><span class="wave-emoji">👋</span> ByeSky</h1>
+        <h1 class="logo"><span class="wave-emoji">👋</span> Nimbye</h1>
         <div id="user-profile" class="header-actions hidden">
           <span id="user-handle" class="user-handle"></span>
           <span id="last-synced-time" class="last-synced-time"></span>
@@ -108,7 +108,7 @@
       <!-- Shown when the signed-in session is missing permissions added since it was granted -->
       <div id="reauth-banner" class="reauth-banner hidden" role="alert">
         <div class="reauth-banner-text">
-          <strong id="reauth-banner-title">ByeSky needs an extra permission.</strong>
+          <strong id="reauth-banner-title">Nimbye needs an extra permission.</strong>
           <span id="reauth-banner-detail"></span>
         </div>
         <button type="button" id="reauth-btn" class="btn btn-primary btn-sm">Sign in again</button>
@@ -117,14 +117,14 @@
       <!-- App Loading State -->
       <section id="app-loading-section" class="card hidden">
         <div class="spinner"></div>
-        <p class="loading-message">Loading ByeSky...</p>
+        <p class="loading-message">Loading Nimbye...</p>
       </section>
 
       <!-- Section 1: Account Connection (visible in initial HTML for instant load & search indexing) -->
       <section id="auth-section" class="card">
         <h2>Clean up who you follow on Bluesky</h2>
         <p class="description">
-          ByeSky helps you review the accounts you follow on Bluesky and spot inactive, muted, or
+          Nimbye helps you review the accounts you follow on Bluesky and spot inactive, muted, or
           one-way profiles. Set your own scoring weights, see who interacts with you, lock
           favourites you want to keep, and unfollow in bulk or one by one. Sign in with your Bluesky
           handle to get started.
@@ -149,25 +149,25 @@
         </form>
 
         <div class="permissions-note" id="permissions-note">
-          <h3>What ByeSky asks permission for</h3>
+          <h3>What Nimbye asks permission for</h3>
           <ul>
             <li>
               <strong>Read</strong> who you follow, your notifications, and public profiles and
               posts, to score each account.
             </li>
             <li>
-              <strong>Follow and unfollow</strong> accounts, only when you confirm it. ByeSky can't
+              <strong>Follow and unfollow</strong> accounts, only when you confirm it. Nimbye can't
               post, like, block or change your profile.
             </li>
             <li>
-              <strong>List your DM conversations</strong>, to see who you talk to. ByeSky never
+              <strong>List your DM conversations</strong>, to see who you talk to. Nimbye never
               sends messages.
             </li>
           </ul>
           <p>
             Bluesky's sign-in screen uses broader labels for these, such as
             <em>"Access specific parts of your Bluesky account"</em> and
-            <em>"Chat: Read and send messages"</em>. Everything ByeSky finds stays in this browser.
+            <em>"Chat: Read and send messages"</em>. Everything Nimbye finds stays in this browser.
           </p>
         </div>
       </section>
@@ -176,7 +176,7 @@
       <section id="sync-section" class="card hidden">
         <h2>Analyzing the accounts you follow</h2>
         <p class="description">
-          ByeSky works at a gentle pace so your other Bluesky apps keep working while it runs. Large
+          Nimbye works at a gentle pace so your other Bluesky apps keep working while it runs. Large
           follow lists can take 10 minutes or more, and you can keep this tab in the background.
         </p>
 
@@ -200,7 +200,7 @@
           </div>
           <p id="sync-eta" class="sync-eta hidden"></p>
           <p id="sync-elsewhere" class="sync-eta hidden">
-            This sync is running in another ByeSky tab. This tab will update when it's done.
+            This sync is running in another Nimbye tab. This tab will update when it's done.
           </p>
         </div>
 
@@ -731,7 +731,7 @@
         <a href="https://bsky.app/profile/rowan.fyi" target="_blank" rel="noopener noreferrer"
           >rowan.fyi</a
         >
-        | 🧑‍💻 Code on <a href="https://github.com/rowan-m/byesky">rowan-m/byesky</a>
+        | 🧑‍💻 Code on <a href="https://github.com/rowan-m/nimbye">rowan-m/nimbye</a>
       </p>
     </footer>
 

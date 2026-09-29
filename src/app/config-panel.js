@@ -4,8 +4,8 @@ import { resetConfigBtn } from './dom.js';
 import { state } from './state.js';
 import { renderDashboard } from './table.js';
 
-const CONFIG_COLLAPSED_KEY = 'byesky:configCollapsed';
-const CRITERIA_PREFS_KEY = 'byesky:criteriaPrefs';
+const CONFIG_COLLAPSED_KEY = 'nimbye:configCollapsed';
+const CRITERIA_PREFS_KEY = 'nimbye:criteriaPrefs';
 // Keep in sync with the narrow-layout breakpoint in style.css.
 const narrowLayoutQuery = window.matchMedia('(max-width: 1100px)');
 

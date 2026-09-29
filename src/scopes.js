@@ -2,7 +2,7 @@
 // the OAuth client setup (auth.js), the generated client metadata and the granted-scope
 // check (main.js).
 //
-// ByeSky asks for granular permissions rather than `transition:generic`, which would let it
+// Nimbye asks for granular permissions rather than `transition:generic`, which would let it
 // post, delete and edit the profile on the user's behalf. It only needs to read a handful
 // of AppView endpoints (through the user's PDS), list DM conversations and create/delete
 // follow records.
@@ -42,7 +42,7 @@ export const REQUIRED_SCOPES = [
 
 export const OAUTH_SCOPE = REQUIRED_SCOPES.map(({ scope }) => scope).join(' ');
 
-/** Broad legacy scopes that ByeSky no longer needs and prompts users to drop. */
+/** Broad legacy scopes that Nimbye no longer needs and prompts users to drop. */
 const LEGACY_BROAD_SCOPES = new Set(['transition:generic', 'transition:chat.bsky']);
 
 // Positional parameter name for each permission resource, per the atproto permission spec
@@ -105,7 +105,7 @@ export function getMissingScopes(grantedScope) {
   });
 }
 
-/** True if the grant still includes broad legacy scopes ByeSky no longer asks for. */
+/** True if the grant still includes broad legacy scopes Nimbye no longer asks for. */
 export function hasLegacyBroadScopes(grantedScope) {
   return (grantedScope || '').split(/\s+/).some((s) => LEGACY_BROAD_SCOPES.has(s));
 }
@@ -122,7 +122,7 @@ export function describeScopes(scopes) {
 export function buildClientMetadata(origin) {
   return {
     client_id: `${origin}/client-metadata.json`,
-    client_name: 'ByeSky',
+    client_name: 'Nimbye',
     client_uri: origin,
     logo_uri: `${origin}/icon.png`,
     redirect_uris: [`${origin}/`],

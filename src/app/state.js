@@ -56,7 +56,7 @@ export async function loadAtprotoApi() {
 
 // Hint (not a credential) that a session probably exists, so the API chunk can be
 // fetched in parallel with OAuth session restore instead of after it.
-const SESSION_HINT_KEY = 'byesky:hasSession';
+const SESSION_HINT_KEY = 'nimbye:hasSession';
 export function setSessionHint(hasSession) {
   try {
     if (hasSession) localStorage.setItem(SESSION_HINT_KEY, '1');

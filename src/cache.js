@@ -21,7 +21,7 @@ function migrate(entry) {
 export class UserSyncCache {
   constructor({ indexedDB: idb, localStorage: storage, persistIntervalMs } = {}) {
     this.store = new Map(); // In-memory fallback (used for Node environment and active browser sessions)
-    this.dbName = 'ByeSkyCache';
+    this.dbName = 'NimbyeCache';
     this.dbVersion = 1;
     this.storeName = 'user_sync';
     this.dbPromise = null;
@@ -115,7 +115,7 @@ export class UserSyncCache {
   _loadLockedFromStorage(did) {
     if (!this.storage) return [];
     try {
-      const raw = this.storage.getItem(`byesky_locked_${did}`);
+      const raw = this.storage.getItem(`nimbye_locked_${did}`);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) return parsed;
@@ -129,7 +129,7 @@ export class UserSyncCache {
   _saveLockedToStorage(did, lockedDids) {
     if (!this.storage) return;
     try {
-      this.storage.setItem(`byesky_locked_${did}`, JSON.stringify(lockedDids));
+      this.storage.setItem(`nimbye_locked_${did}`, JSON.stringify(lockedDids));
     } catch (err) {
       console.warn('Failed to save locked DIDs to localStorage:', err);
     }

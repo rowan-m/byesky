@@ -173,7 +173,7 @@ test.describe('session from before granular permissions', () => {
     await expect
       .poll(() => page.evaluate(() => window.__signInCalls || []))
       .toEqual(['e2e-user.bsky.social']);
-    expect(await page.evaluate(() => sessionStorage.getItem('byesky:resyncAfterReauth'))).toBe('1');
+    expect(await page.evaluate(() => sessionStorage.getItem('nimbye:resyncAfterReauth'))).toBe('1');
   });
 });
 
@@ -194,9 +194,9 @@ test('no re-auth prompt when all scopes are granted', async ({ page }) => {
 });
 
 test('returning from re-auth with all scopes starts a fresh sync', async ({ page }) => {
-  await page.evaluate(() => sessionStorage.setItem('byesky:resyncAfterReauth', '1'));
+  await page.evaluate(() => sessionStorage.setItem('nimbye:resyncAfterReauth', '1'));
   await page.reload();
   await expect(page.locator('#sync-section')).toBeVisible();
   await expect(page.locator('#reauth-banner')).toBeHidden();
-  expect(await page.evaluate(() => sessionStorage.getItem('byesky:resyncAfterReauth'))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem('nimbye:resyncAfterReauth'))).toBeNull();
 });

@@ -1,6 +1,6 @@
-# ByeSky — Clean up who you follow on Bluesky
+# Nimbye — Clean up who you follow on Bluesky
 
-ByeSky is a minimal client-side web application that helps Bluesky / Atmosphere users review and clean up who they follow. It fetches the accounts you follow, scores each one against customisable criteria (such as inactivity, no follow-back, or lack of recent interactions), and lets you dynamically filter, sort, protect favourites, and unfollow in bulk or one by one.
+Nimbye is a minimal client-side web application that helps Bluesky / Atmosphere users review and clean up who they follow. It fetches the accounts you follow, scores each one against customisable criteria (such as inactivity, no follow-back, or lack of recent interactions), and lets you dynamically filter, sort, protect favourites, and unfollow in bulk or one by one.
 
 ---
 
@@ -61,10 +61,10 @@ npm run preview
 
 ## Data & Privacy
 
-ByeSky runs entirely in your browser and talks directly to your Bluesky Personal Data Server (PDS) and the public Bluesky AppView over OAuth:
+Nimbye runs entirely in your browser and talks directly to your Bluesky Personal Data Server (PDS) and the public Bluesky AppView over OAuth:
 
-- **Least-privilege OAuth scopes**: ByeSky requests read access to your profile, follows, blocks, mutes, notifications, likes, and chat metadata, plus create/delete permission on `app.bsky.graph.follow` records only.
-- **Local browser cache**: Synced profile and activity summaries are cached locally in your browser's `IndexedDB` (`ByeSkyCache`) so you can filter, score, and revisit your list without re-fetching everything.
+- **Least-privilege OAuth scopes**: Nimbye requests read access to your profile, follows, blocks, mutes, notifications, likes, and chat metadata, plus create/delete permission on `app.bsky.graph.follow` records only.
+- **Local browser cache**: Synced profile and activity summaries are cached locally in your browser's `IndexedDB` (`NimbyeCache`) so you can filter, score, and revisit your list without re-fetching everything.
 - **Signing out**: Clicking **Logout** revokes the active OAuth session and clears the cached sync data for your account on this device (while keeping your locked-account list so protected accounts stay protected next time you sign in).
 
 ---
