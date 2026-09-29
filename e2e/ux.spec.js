@@ -318,8 +318,9 @@ test('login button disables and shows Connecting... while resolving handle, and 
   await loginHandle.press('ArrowDown');
   await loginHandle.press('Enter');
   await expect(loginHandle).toHaveValue('rowan.fyi');
+  await expect(loginBtn).toBeEnabled();
 
-  await loginBtn.click();
+  await loginHandle.press('Enter');
 
   await expect(loginBtn).toBeDisabled();
   await expect(loginBtn).toHaveText('Connecting...');
