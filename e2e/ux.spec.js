@@ -334,6 +334,10 @@ test('SEO metadata, OpenGraph preview image, and JSON-LD structured data are pre
     'content',
     'https://nimbye.web.app/og-image.png',
   );
+  await expect(page.locator('meta[property="og:logo"]')).toHaveAttribute(
+    'content',
+    'https://nimbye.web.app/icon.png',
+  );
   const metaDesc = await page.locator('meta[name="description"]').getAttribute('content');
   const ogDesc = await page.locator('meta[property="og:description"]').getAttribute('content');
   expect(metaDesc.length).toBeGreaterThanOrEqual(70);
@@ -347,6 +351,7 @@ test('SEO metadata, OpenGraph preview image, and JSON-LD structured data are pre
 
   for (const assetPath of [
     '/og-image.png',
+    '/favicon.ico',
     '/icon.png',
     '/icon.svg',
     '/robots.txt',
