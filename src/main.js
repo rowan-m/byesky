@@ -1,3 +1,4 @@
+import 'actor-typeahead';
 import { setupActionListeners } from './app/actions.js';
 import { initializeStateFromDOM, setupConfigListeners } from './app/config-panel.js';
 import { loginError } from './app/dom.js';

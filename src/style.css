@@ -342,6 +342,20 @@ input[type='number']:disabled {
   cursor: not-allowed;
 }
 
+actor-typeahead {
+  --color-background: var(--bg-card);
+  --color-border: var(--border-color);
+  --color-hover: var(--bg-row-hover);
+  --color-avatar-fallback: var(--border-color);
+  --radius: var(--border-radius);
+}
+
+actor-typeahead::part(menu) {
+  z-index: 10;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
 .error-msg {
   background-color: var(--danger-light);
   color: var(--badge-danger-text);

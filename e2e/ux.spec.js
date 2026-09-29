@@ -302,11 +302,23 @@ test('login button disables and shows Connecting... while resolving handle, and 
         `,
       }),
   );
+  await page.route('**/xrpc/app.bsky.actor.searchActorsTypeahead*', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ actors: [{ handle: 'rowan.fyi', avatar: '' }] }),
+    }),
+  );
   await page.goto('/');
   const loginHandle = page.locator('#login-handle');
   const loginBtn = page.locator('#login-btn');
 
-  await loginHandle.fill('rowan.fyi');
+  const typeaheadResponse = page.waitForResponse('**/xrpc/app.bsky.actor.searchActorsTypeahead*');
+  await loginHandle.fill('rowan');
+  await typeaheadResponse;
+  await loginHandle.press('ArrowDown');
+  await loginHandle.press('Enter');
+  await expect(loginHandle).toHaveValue('rowan.fyi');
+
   await loginBtn.click();
 
   await expect(loginBtn).toBeDisabled();

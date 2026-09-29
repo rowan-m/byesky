@@ -26,7 +26,8 @@
   },
   "dependencies": {
     "@atproto/api": "^0.21.0",
-    "@atproto/oauth-client-browser": "^0.5.7"
+    "@atproto/oauth-client-browser": "^0.5.7",
+    "actor-typeahead": "^0.1.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
