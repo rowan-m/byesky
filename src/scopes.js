@@ -117,11 +117,15 @@ export function describeScopes(scopes) {
 
 /**
  * OAuth client metadata for a deployment origin. Used at runtime by the OAuth client and at
- * build time to generate the served `client-metadata.json`, so the two can't drift apart.
+ * build time to generate the served `oauth-client-metadata.json`, so the two can't drift apart.
+ *
+ * Naming the file `/oauth-client-metadata.json` matches `@atproto/oauth-provider-ui`'s
+ * conventional metadata path check (`pathname === '/oauth-client-metadata.json'`), so the
+ * Bluesky consent screen displays just `nimbye.web.app` instead of the full metadata URL.
  */
 export function buildClientMetadata(origin) {
   return {
-    client_id: `${origin}/client-metadata.json`,
+    client_id: `${origin}/oauth-client-metadata.json`,
     client_name: 'Nimbye',
     client_uri: origin,
     logo_uri: `${origin}/icon.png`,

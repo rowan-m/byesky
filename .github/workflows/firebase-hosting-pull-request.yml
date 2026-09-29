@@ -48,7 +48,7 @@ jobs:
             }
             const url = Array.isArray(parsed) ? parsed[0] : parsed;
             if (url) {
-              const file = 'dist/client-metadata.json';
+              const file = 'dist/oauth-client-metadata.json';
               let content = fs.readFileSync(file, 'utf8');
               content = content.replace(/https:\/\/nimbye\.web.app/g, url);
               fs.writeFileSync(file, content, 'utf8');
