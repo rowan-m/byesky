@@ -351,6 +351,7 @@ test('SEO metadata, OpenGraph preview image, and JSON-LD structured data are pre
 
   for (const assetPath of [
     '/og-image.png',
+    '/favicon.ico',
     '/icon.png',
     '/icon.svg',
     '/robots.txt',
