@@ -1,6 +1,6 @@
 {
-  "name": "ByeSky — Clean up who you follow on Bluesky",
-  "short_name": "ByeSky",
+  "name": "Nimbye — Clean up who you follow on Bluesky",
+  "short_name": "Nimbye",
   "description": "Spot inactive, muted, or one-way Bluesky accounts. Score by real interactions, lock favourites, and unfollow in bulk.",
   "start_url": "/",
   "display": "standalone",

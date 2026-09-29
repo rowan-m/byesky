@@ -282,14 +282,14 @@ test('SEO metadata, OpenGraph preview image, and JSON-LD structured data are pre
   page,
   request,
 }) => {
-  await expect(page).toHaveTitle('ByeSky — Clean up who you follow on Bluesky');
+  await expect(page).toHaveTitle('Nimbye — Clean up who you follow on Bluesky');
   await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(
     'content',
-    'ByeSky — Clean up who you follow on Bluesky',
+    'Nimbye — Clean up who you follow on Bluesky',
   );
   await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
     'content',
-    'https://bye-sky.web.app/og-image.png',
+    'https://nimbye.web.app/og-image.png',
   );
   const metaDesc = await page.locator('meta[name="description"]').getAttribute('content');
   const ogDesc = await page.locator('meta[property="og:description"]').getAttribute('content');
@@ -300,7 +300,7 @@ test('SEO metadata, OpenGraph preview image, and JSON-LD structured data are pre
   const jsonLdText = await page.locator('script[type="application/ld+json"]').textContent();
   const jsonLd = JSON.parse(jsonLdText);
   expect(jsonLd['@type']).toBe('WebApplication');
-  expect(jsonLd.name).toBe('ByeSky');
+  expect(jsonLd.name).toBe('Nimbye');
 
   for (const assetPath of [
     '/og-image.png',

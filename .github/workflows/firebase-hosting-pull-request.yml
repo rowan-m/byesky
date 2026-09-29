@@ -30,8 +30,8 @@ jobs:
         id: firebase_deploy
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BYE_SKY }}
-          projectId: bye-sky
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_NIMBYE }}
+          projectId: nimbye
 
       - name: Inject Dynamic Preview URL into OAuth Metadata
         env:
@@ -50,7 +50,7 @@ jobs:
             if (url) {
               const file = 'dist/client-metadata.json';
               let content = fs.readFileSync(file, 'utf8');
-              content = content.replace(/https:\/\/bye-sky\.web.app/g, url);
+              content = content.replace(/https:\/\/nimbye\.web.app/g, url);
               fs.writeFileSync(file, content, 'utf8');
               console.log('Successfully injected preview URL:', url);
             } else {
@@ -63,5 +63,5 @@ jobs:
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BYE_SKY }}
-          projectId: bye-sky
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_NIMBYE }}
+          projectId: nimbye

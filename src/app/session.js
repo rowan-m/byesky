@@ -25,7 +25,7 @@ import { checkSyncStatus, triggerSync } from './sync-ui.js';
 
 // Sessions authorised before the app added a scope keep their original grant until the
 // user signs in again, so check what was granted and prompt if anything is missing.
-const RESYNC_AFTER_REAUTH_KEY = 'byesky:resyncAfterReauth';
+const RESYNC_AFTER_REAUTH_KEY = 'nimbye:resyncAfterReauth';
 
 export function setupSessionListeners() {
   loginForm.addEventListener('submit', handleLogin);
@@ -128,8 +128,8 @@ function renderReauthBanner(errorMessage = '') {
   const title = document.getElementById('reauth-banner-title');
   if (title) {
     title.textContent = state.hasLegacyScopes
-      ? 'ByeSky has narrowed its permissions.'
-      : 'ByeSky needs an extra permission.';
+      ? 'Nimbye has narrowed its permissions.'
+      : 'Nimbye needs an extra permission.';
   }
   const message = state.hasLegacyScopes
     ? 'It now asks only for what it needs instead of broad access to your account. Sign in again to switch; until then some results may be incomplete.'

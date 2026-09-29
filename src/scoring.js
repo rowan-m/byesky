@@ -1,4 +1,4 @@
-// Pure scoring, filtering, sorting, and sanitization helpers for ByeSky.
+// Pure scoring, filtering, sorting, and sanitization helpers for Nimbye.
 
 import { CRITERIA } from './criteria.js';
 
