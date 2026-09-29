@@ -16,7 +16,7 @@ function productionHeaders() {
 // the generated file to the preview channel's URL.
 const SITE_ORIGIN = process.env.SITE_ORIGIN || 'https://nimbye.web.app';
 
-/** Emits client-metadata.json from the same source the OAuth client uses at runtime. */
+/** Emits oauth-client-metadata.json from the same source the OAuth client uses at runtime. */
 function clientMetadataPlugin() {
   return {
     name: 'nimbye-client-metadata',
@@ -24,7 +24,7 @@ function clientMetadataPlugin() {
     generateBundle() {
       this.emitFile({
         type: 'asset',
-        fileName: 'client-metadata.json',
+        fileName: 'oauth-client-metadata.json',
         source: JSON.stringify(buildClientMetadata(SITE_ORIGIN), null, 2) + '\n',
       });
     },

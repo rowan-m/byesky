@@ -5,6 +5,7 @@ import {
   appLoadingSection,
   authSection,
   dashboardSection,
+  loginBtn,
   loginError,
   loginForm,
   loginHandle,
@@ -31,6 +32,12 @@ export function setupSessionListeners() {
   loginForm.addEventListener('submit', handleLogin);
   logoutBtn.addEventListener('click', handleLogout);
   document.getElementById('reauth-btn')?.addEventListener('click', handleReauth);
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) {
+      setLoginConnecting(false);
+      setReauthConnecting(false);
+    }
+  });
 }
 
 export async function checkSession() {
@@ -147,8 +154,29 @@ function consumeResyncAfterReauth() {
   }
 }
 
+function setLoginConnecting(connecting) {
+  if (loginBtn) {
+    loginBtn.disabled = connecting;
+    loginBtn.textContent = connecting ? 'Connecting...' : 'Connect with Bluesky';
+    loginBtn.setAttribute('aria-busy', connecting ? 'true' : 'false');
+  }
+  if (loginHandle) {
+    loginHandle.disabled = connecting;
+  }
+}
+
+function setReauthConnecting(connecting) {
+  const reauthBtn = document.getElementById('reauth-btn');
+  if (reauthBtn) {
+    reauthBtn.disabled = connecting;
+    reauthBtn.textContent = connecting ? 'Connecting...' : 'Sign in again';
+    reauthBtn.setAttribute('aria-busy', connecting ? 'true' : 'false');
+  }
+}
+
 async function handleReauth() {
   if (!state.user) return;
+  setReauthConnecting(true);
   try {
     sessionStorage.setItem(RESYNC_AFTER_REAUTH_KEY, '1');
   } catch {
@@ -158,6 +186,7 @@ async function handleReauth() {
     // Redirects to the user's PDS, which asks them to approve the full, current scope set.
     await initOAuthClient().signIn(state.user.handle);
   } catch (err) {
+    setReauthConnecting(false);
     renderReauthBanner(`Couldn't start sign-in: ${err.message || err}. Please try again.`);
   }
 }
@@ -170,11 +199,14 @@ async function handleLogin(e) {
   const handle = loginHandle.value.trim();
   if (!handle) return;
 
+  setLoginConnecting(true);
+
   try {
     const oauthClient = initOAuthClient();
     // Redirects browser window to user's PDS auth page
     await oauthClient.signIn(handle);
   } catch (err) {
+    setLoginConnecting(false);
     loginError.textContent = err.message || 'OAuth initiation failed.';
     loginError.classList.remove('hidden');
   }
@@ -218,6 +250,7 @@ export function hideLoading() {
 
 export function showAuthSection() {
   hideLoading();
+  setLoginConnecting(false);
   authSection.classList.remove('hidden');
   syncSection.classList.add('hidden');
   dashboardSection.classList.add('hidden');

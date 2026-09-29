@@ -5,6 +5,7 @@ export const syncSection = document.getElementById('sync-section');
 export const dashboardSection = document.getElementById('dashboard-section');
 export const loginForm = document.getElementById('login-form');
 export const loginHandle = document.getElementById('login-handle');
+export const loginBtn = document.getElementById('login-btn');
 export const loginError = document.getElementById('login-error');
 export const userProfile = document.getElementById('user-profile');
 export const userHandleSpan = document.getElementById('user-handle');

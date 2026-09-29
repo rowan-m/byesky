@@ -30,7 +30,7 @@ export function initOAuthClient() {
   } else {
     oauthClient = new BrowserOAuthClient({
       handleResolver: 'https://bsky.social',
-      // Must match the client-metadata.json generated for this origin at build time.
+      // Must match the oauth-client-metadata.json generated for this origin at build time.
       clientMetadata: buildClientMetadata(origin),
     });
   }

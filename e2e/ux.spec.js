@@ -278,6 +278,49 @@ test('malformed percent in OAuth error query parameter does not crash startup', 
   await expect(page.locator('#login-error')).toContainText('100% failed');
 });
 
+test('login button disables and shows Connecting... while resolving handle, and resets on error', async ({
+  page,
+}) => {
+  await page.unroute('**/src/auth.js');
+  await page.route(
+    (url) => url.pathname === '/src/auth.js',
+    (route) =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body: `
+          export function initOAuthClient() {
+            return {
+              async init() { return {}; },
+              signIn(handle) {
+                window.__signInHandle = handle;
+                return new Promise((_, reject) => {
+                  window.__rejectSignIn = () => reject(new Error('Could not resolve handle'));
+                });
+              },
+            };
+          }
+        `,
+      }),
+  );
+  await page.goto('/');
+  const loginHandle = page.locator('#login-handle');
+  const loginBtn = page.locator('#login-btn');
+
+  await loginHandle.fill('rowan.fyi');
+  await loginBtn.click();
+
+  await expect(loginBtn).toBeDisabled();
+  await expect(loginBtn).toHaveText('Connecting...');
+  await expect(loginHandle).toBeDisabled();
+
+  await page.evaluate(() => window.__rejectSignIn());
+
+  await expect(loginBtn).toBeEnabled();
+  await expect(loginBtn).toHaveText('Connect with Bluesky');
+  await expect(loginHandle).toBeEnabled();
+  await expect(page.locator('#login-error')).toContainText('Could not resolve handle');
+});
+
 test('SEO metadata, OpenGraph preview image, and JSON-LD structured data are present and served', async ({
   page,
   request,

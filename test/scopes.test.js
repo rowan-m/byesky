@@ -85,7 +85,7 @@ test('OAuth scopes', async (t) => {
   await t.test('client metadata is derived from the origin and scopes', () => {
     const metadata = buildClientMetadata('https://example.test');
     assert.deepStrictEqual(metadata, {
-      client_id: 'https://example.test/client-metadata.json',
+      client_id: 'https://example.test/oauth-client-metadata.json',
       client_name: 'Nimbye',
       client_uri: 'https://example.test',
       logo_uri: 'https://example.test/icon.png',
