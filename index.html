@@ -135,16 +135,18 @@
         <form id="login-form">
           <div class="form-group">
             <label for="login-handle">Bluesky Handle</label>
-            <input
-              type="text"
-              id="login-handle"
-              placeholder="username.bsky.social"
-              required
-              autocomplete="username"
-              autocapitalize="none"
-              autocorrect="off"
-              spellcheck="false"
-            />
+            <actor-typeahead>
+              <input
+                type="text"
+                id="login-handle"
+                placeholder="username.bsky.social"
+                required
+                autocomplete="off"
+                autocapitalize="none"
+                autocorrect="off"
+                spellcheck="false"
+              />
+            </actor-typeahead>
           </div>
           <div id="login-error" class="error-msg hidden" role="alert"></div>
           <button type="submit" id="login-btn" class="btn btn-primary">Connect with Bluesky</button>

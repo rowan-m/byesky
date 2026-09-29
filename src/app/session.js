@@ -38,6 +38,44 @@ export function setupSessionListeners() {
       setReauthConnecting(false);
     }
   });
+
+  // <actor-typeahead> unconditionally calls preventDefault() on Enter, even when no menu
+  // item is highlighted (e.g. pressing Enter a second time after picking a handle). Detect
+  // whether its keydown handler wrote to loginHandle.value; if not, submit the form.
+  let typeaheadSelectedOnEnter = false;
+  const valueDesc =
+    loginHandle && Object.getOwnPropertyDescriptor(Object.getPrototypeOf(loginHandle), 'value');
+  if (loginHandle && valueDesc?.get && valueDesc?.set) {
+    Object.defineProperty(loginHandle, 'value', {
+      configurable: true,
+      get() {
+        return valueDesc.get.call(this);
+      },
+      set(v) {
+        typeaheadSelectedOnEnter = true;
+        valueDesc.set.call(this, v);
+      },
+    });
+  }
+  loginForm.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key === 'Enter' && e.target === loginHandle) {
+        typeaheadSelectedOnEnter = false;
+      }
+    },
+    true,
+  );
+  loginForm.addEventListener('keydown', (e) => {
+    if (
+      e.key === 'Enter' &&
+      e.target === loginHandle &&
+      !e.isComposing &&
+      !typeaheadSelectedOnEnter
+    ) {
+      loginForm.requestSubmit();
+    }
+  });
 }
 
 export async function checkSession() {
