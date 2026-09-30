@@ -358,6 +358,44 @@ test('startBackgroundSync paginates follows, maps interactions, and enriches acc
     },
   );
 
+  await t.test('skips chat scan when user profile has no chat service associated', async () => {
+    await syncCache.clear(userDid);
+    let chatCalled = false;
+    const { agent } = makeFakeAgents({
+      followsPages: [[{ did: 'did:plc:alice', handle: 'alice.bsky.social' }]],
+      profiles: [
+        {
+          did: userDid,
+          handle: 'me.blacksky.app',
+          associated: { lists: 0 }, // no chat property
+        },
+      ],
+    });
+    const origWithProxy = agent.withProxy;
+    agent.withProxy = (service) => {
+      if (service === 'bsky_chat') {
+        return {
+          chat: {
+            bsky: {
+              convo: {
+                listConvos: async () => {
+                  chatCalled = true;
+                  return { data: { convos: [] } };
+                },
+              },
+            },
+          },
+        };
+      }
+      return origWithProxy(service);
+    };
+
+    await startBackgroundSync(agent, userDid);
+    assert.strictEqual(chatCalled, false);
+    const cached = await syncCache.get(userDid);
+    assert.strictEqual(cached.status, 'completed');
+  });
+
   await t.test(
     'marks failed scan sources in criteria.unknown instead of negative flags',
     async () => {
