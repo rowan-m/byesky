@@ -11,11 +11,14 @@ const PUBLIC_APPVIEW = 'https://api.bsky.app';
 /**
  * Agent for AppView reads that need the signed-in user's context (viewer state such as
  * mutes, blocks and follows; known followers; notifications). Requests go to the user's PDS,
- * which authenticates them and proxies to the Bluesky AppView. OAuth tokens are bound to the
+ * which authenticates them and proxies to its configured AppView. OAuth tokens are bound to the
  * PDS, so they can't be sent to the AppView directly.
  */
 export function createViewerAgent(agent) {
-  return agent.withProxy('bsky_appview', 'did:web:api.bsky.app');
+  if (!agent?.api?.app && typeof agent?.withProxy === 'function') {
+    return agent.withProxy('bsky_appview');
+  }
+  return agent;
 }
 
 /**
@@ -252,6 +255,7 @@ async function scanInboundInteractions({
   updateInteraction,
 }) {
   let inboundFailed = false;
+  let notificationsSucceeded = false;
 
   await progress(0, SCAN_LIMIT, 'Fetching interaction history (notifications & DMs)...', {
     step: syncStep('notifications'),
@@ -313,6 +317,7 @@ async function scanInboundInteractions({
       );
       if (onUpdate) onUpdate();
     } while (cursor && fetchedCount < maxNotificationsToScan);
+    notificationsSucceeded = true;
   } catch (err) {
     if (isCancel(err)) throw err;
     console.warn('Could not fetch notifications for interactions:', err);
@@ -320,45 +325,67 @@ async function scanInboundInteractions({
   }
 
   // DMs. Only accepted conversations count: a request you haven't accepted isn't contact
-  // you've engaged with (and is often spam).
+  // you've engaged with (and is often spam). Accounts on federated PDSes without a chat
+  // service (e.g. Blacksky) have no `associated.chat` in their profile, so skip DMs to avoid
+  // issuing requests to unsupported services.
+  let shouldScanChat = true;
   try {
-    const chatAgent = agent.withProxy('bsky_chat', 'did:web:api.bsky.chat');
-    let convoCursor;
-    let pages = 0;
-    do {
-      const res = await fetchWithBackoff(
-        userDid,
-        () => chatAgent.chat.bsky.convo.listConvos({ limit: 100, cursor: convoCursor }),
-        onUpdate,
-        limiters.pds,
-        signal,
-      );
-      for (const convo of res.data.convos || []) {
-        if (convo.status && convo.status !== 'accepted') continue;
-        if (!convo.lastMessage) continue;
-        for (const member of convo.members || []) {
-          if (member.did === userDid) continue;
-          interactions.messagedBy.add(member.did);
-          interactions.userInteractedWith.add(member.did);
-          userOutboundInteractions.add(member.did);
-          const msgDate = convo.lastMessage.sentAt;
-          if (msgDate) {
-            updateInteraction(
-              member.did,
-              msgDate,
-              'message',
-              `https://bsky.app/messages/${encodeURIComponent(convo.id)}`,
-            );
+    const profileRes = await fetchWithBackoff(
+      userDid,
+      () => viewerAgent.api.app.bsky.actor.getProfile({ actor: userDid }),
+      onUpdate,
+      limiters.pds,
+      signal,
+    );
+    if (profileRes.data?.associated && !profileRes.data.associated.chat) {
+      shouldScanChat = false;
+    }
+  } catch {
+    // If profile check fails, proceed with the chat scan attempt
+  }
+
+  if (shouldScanChat) {
+    try {
+      const chatAgent = agent.withProxy('bsky_chat', 'did:web:api.bsky.chat');
+      let convoCursor;
+      let pages = 0;
+      do {
+        const res = await fetchWithBackoff(
+          userDid,
+          () => chatAgent.chat.bsky.convo.listConvos({ limit: 100, cursor: convoCursor }),
+          onUpdate,
+          limiters.pds,
+          signal,
+        );
+        for (const convo of res.data.convos || []) {
+          if (convo.status && convo.status !== 'accepted') continue;
+          if (!convo.lastMessage) continue;
+          for (const member of convo.members || []) {
+            if (member.did === userDid) continue;
+            interactions.messagedBy.add(member.did);
+            interactions.userInteractedWith.add(member.did);
+            userOutboundInteractions.add(member.did);
+            const msgDate = convo.lastMessage.sentAt;
+            if (msgDate) {
+              updateInteraction(
+                member.did,
+                msgDate,
+                'message',
+                `https://bsky.app/messages/${encodeURIComponent(convo.id)}`,
+              );
+            }
           }
         }
+        convoCursor = res.data.cursor;
+        pages++;
+      } while (convoCursor && pages < MAX_CONVO_PAGES);
+    } catch (err) {
+      if (isCancel(err)) throw err;
+      console.warn('Could not fetch chat conversations:', err);
+      if (!notificationsSucceeded) {
+        inboundFailed = true;
       }
-      convoCursor = res.data.cursor;
-      pages++;
-    } while (convoCursor && pages < MAX_CONVO_PAGES);
-  } catch (err) {
-    if (isCancel(err)) throw err;
-    console.warn('Could not fetch chat conversations:', err);
-    inboundFailed = true;
+    }
   }
 
   return inboundFailed;

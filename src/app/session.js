@@ -130,18 +130,28 @@ export async function checkSession() {
  */
 async function resolveOwnHandle(api, did) {
   try {
+    const repo = await state.agent?.com?.atproto?.repo?.describeRepo({ repo: did });
+    if (repo?.data?.handle && repo.data.handle !== 'handle.invalid') {
+      return repo.data.handle;
+    }
+  } catch (err) {
+    console.warn('PDS repo lookup failed, trying public profile:', err);
+  }
+  try {
     const publicAgent = api.createAgent({ service: 'https://api.bsky.app' });
-    return (await publicAgent.app.bsky.actor.getProfile({ actor: did })).data.handle;
+    const handle = (await publicAgent.app.bsky.actor.getProfile({ actor: did })).data.handle;
+    if (handle && handle !== 'handle.invalid') return handle;
   } catch (err) {
     console.warn('Public profile lookup failed, trying via the PDS:', err);
   }
   try {
     const viewer = api.createViewerAgent(state.agent);
-    return (await viewer.app.bsky.actor.getProfile({ actor: did })).data.handle;
+    const handle = (await viewer.app.bsky.actor.getProfile({ actor: did })).data.handle;
+    if (handle && handle !== 'handle.invalid') return handle;
   } catch (err) {
     console.warn('Could not look up own handle; showing DID instead:', err);
-    return did;
   }
+  return did;
 }
 
 async function checkGrantedScopes(session) {

@@ -5,6 +5,7 @@ import {
   batchFollow,
   batchUnfollow,
   cancelSync,
+  createViewerAgent,
   fetchAccountPreview,
   followUser,
   quotedAuthorDid,
@@ -143,6 +144,21 @@ function makeFakeAgents({
 
   return { agent, viewerAgent, publicAgent };
 }
+
+test('createViewerAgent supports both direct PDS routing and mock withProxy', async (t) => {
+  await t.test('returns agent directly when api.app is present (real Agent)', () => {
+    const realAgent = { api: { app: {} } };
+    assert.strictEqual(createViewerAgent(realAgent), realAgent);
+  });
+
+  await t.test('calls withProxy("bsky_appview") when api.app is missing on mock agent', () => {
+    const proxied = {};
+    const mockAgent = {
+      withProxy: (service) => (service === 'bsky_appview' ? proxied : null),
+    };
+    assert.strictEqual(createViewerAgent(mockAgent), proxied);
+  });
+});
 
 test('applyActorError uses XRPC error names', async (t) => {
   await t.test('blocked-by-them sets isBlocked, not isBlocking', () => {
@@ -341,6 +357,44 @@ test('startBackgroundSync paginates follows, maps interactions, and enriches acc
       assert.strictEqual(ghost.criteria.hasMessagedUser, false);
     },
   );
+
+  await t.test('skips chat scan when user profile has no chat service associated', async () => {
+    await syncCache.clear(userDid);
+    let chatCalled = false;
+    const { agent } = makeFakeAgents({
+      followsPages: [[{ did: 'did:plc:alice', handle: 'alice.bsky.social' }]],
+      profiles: [
+        {
+          did: userDid,
+          handle: 'me.blacksky.app',
+          associated: { lists: 0 }, // no chat property
+        },
+      ],
+    });
+    const origWithProxy = agent.withProxy;
+    agent.withProxy = (service) => {
+      if (service === 'bsky_chat') {
+        return {
+          chat: {
+            bsky: {
+              convo: {
+                listConvos: async () => {
+                  chatCalled = true;
+                  return { data: { convos: [] } };
+                },
+              },
+            },
+          },
+        };
+      }
+      return origWithProxy(service);
+    };
+
+    await startBackgroundSync(agent, userDid);
+    assert.strictEqual(chatCalled, false);
+    const cached = await syncCache.get(userDid);
+    assert.strictEqual(cached.status, 'completed');
+  });
 
   await t.test(
     'marks failed scan sources in criteria.unknown instead of negative flags',

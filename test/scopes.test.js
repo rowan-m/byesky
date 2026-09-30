@@ -43,18 +43,36 @@ test('OAuth scopes', async (t) => {
   });
 
   await t.test('accepts equivalent spellings the server may return', () => {
-    const aud = 'did:web:api.bsky.app#bsky_appview';
     const granted = [
       'atproto',
-      // Query-only form with several methods and an unencoded fragment.
-      `rpc?lxm=app.bsky.graph.getFollows&lxm=app.bsky.actor.getProfile&lxm=app.bsky.actor.getProfiles&aud=${aud}`,
-      // Wildcard method for the AppView audience.
-      `rpc:*?aud=${encodeURIComponent(aud)}`,
-      'rpc:chat.bsky.convo.listConvos?aud=did:web:api.bsky.chat%23bsky_chat',
+      // Query-only form with several methods.
+      'rpc?lxm=app.bsky.graph.getFollows&lxm=app.bsky.actor.getProfile&lxm=app.bsky.actor.getProfiles&aud=*',
+      // Wildcard method for any audience.
+      'rpc:*?aud=*',
+      'rpc:chat.bsky.convo.listConvos?aud=*',
       'repo?collection=app.bsky.graph.follow&action=delete&action=create',
     ].join(' ');
     assert.deepStrictEqual(getMissingScopes(granted), []);
   });
+
+  await t.test(
+    'reports older audience-specific grants as missing so users upgrade to aud=*',
+    () => {
+      const olderSpecificGrant = [
+        'atproto',
+        'rpc:app.bsky.graph.getFollows?aud=did:web:api.bsky.app%23bsky_appview',
+        'rpc:app.bsky.actor.getProfile?aud=did:web:api.bsky.app%23bsky_appview',
+        'rpc:app.bsky.actor.getProfiles?aud=did:web:api.bsky.app%23bsky_appview',
+        'rpc:app.bsky.graph.getKnownFollowers?aud=did:web:api.bsky.app%23bsky_appview',
+        'rpc:app.bsky.notification.listNotifications?aud=did:web:api.bsky.app%23bsky_appview',
+        'rpc:app.bsky.feed.getAuthorFeed?aud=did:web:api.bsky.app%23bsky_appview',
+        'rpc:chat.bsky.convo.listConvos?aud=did:web:api.bsky.chat%23bsky_chat',
+        'repo:app.bsky.graph.follow?action=create&action=delete',
+      ].join(' ');
+      const missing = getMissingScopes(olderSpecificGrant);
+      assert.strictEqual(missing.length, 7);
+    },
+  );
 
   await t.test('narrower grants are still reported as missing', () => {
     const granted = OAUTH_SCOPE.replace(
