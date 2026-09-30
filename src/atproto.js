@@ -11,11 +11,14 @@ const PUBLIC_APPVIEW = 'https://api.bsky.app';
 /**
  * Agent for AppView reads that need the signed-in user's context (viewer state such as
  * mutes, blocks and follows; known followers; notifications). Requests go to the user's PDS,
- * which authenticates them and proxies to the Bluesky AppView. OAuth tokens are bound to the
+ * which authenticates them and proxies to its configured AppView. OAuth tokens are bound to the
  * PDS, so they can't be sent to the AppView directly.
  */
 export function createViewerAgent(agent) {
-  return agent.withProxy('bsky_appview', 'did:web:api.bsky.app');
+  if (!agent?.api?.app && typeof agent?.withProxy === 'function') {
+    return agent.withProxy('bsky_appview');
+  }
+  return agent;
 }
 
 /**
@@ -252,6 +255,7 @@ async function scanInboundInteractions({
   updateInteraction,
 }) {
   let inboundFailed = false;
+  let notificationsSucceeded = false;
 
   await progress(0, SCAN_LIMIT, 'Fetching interaction history (notifications & DMs)...', {
     step: syncStep('notifications'),
@@ -313,6 +317,7 @@ async function scanInboundInteractions({
       );
       if (onUpdate) onUpdate();
     } while (cursor && fetchedCount < maxNotificationsToScan);
+    notificationsSucceeded = true;
   } catch (err) {
     if (isCancel(err)) throw err;
     console.warn('Could not fetch notifications for interactions:', err);
@@ -358,7 +363,9 @@ async function scanInboundInteractions({
   } catch (err) {
     if (isCancel(err)) throw err;
     console.warn('Could not fetch chat conversations:', err);
-    inboundFailed = true;
+    if (!notificationsSucceeded) {
+      inboundFailed = true;
+    }
   }
 
   return inboundFailed;

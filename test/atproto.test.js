@@ -5,6 +5,7 @@ import {
   batchFollow,
   batchUnfollow,
   cancelSync,
+  createViewerAgent,
   fetchAccountPreview,
   followUser,
   quotedAuthorDid,
@@ -143,6 +144,21 @@ function makeFakeAgents({
 
   return { agent, viewerAgent, publicAgent };
 }
+
+test('createViewerAgent supports both direct PDS routing and mock withProxy', async (t) => {
+  await t.test('returns agent directly when api.app is present (real Agent)', () => {
+    const realAgent = { api: { app: {} } };
+    assert.strictEqual(createViewerAgent(realAgent), realAgent);
+  });
+
+  await t.test('calls withProxy("bsky_appview") when api.app is missing on mock agent', () => {
+    const proxied = {};
+    const mockAgent = {
+      withProxy: (service) => (service === 'bsky_appview' ? proxied : null),
+    };
+    assert.strictEqual(createViewerAgent(mockAgent), proxied);
+  });
+});
 
 test('applyActorError uses XRPC error names', async (t) => {
   await t.test('blocked-by-them sets isBlocked, not isBlocking', () => {

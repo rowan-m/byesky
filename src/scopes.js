@@ -10,14 +10,10 @@
 export const APPVIEW_SERVICE = 'did:web:api.bsky.app#bsky_appview';
 export const CHAT_SERVICE = 'did:web:api.bsky.chat#bsky_chat';
 
-// Scope strings are space-separated, and `#` would start a URL fragment, so the service
-// fragment separator is the one character that has to be percent-encoded (as in the spec).
-const audParam = (service) => service.replace('#', '%23');
-
 const READ_PURPOSE = 'read your follows, profiles and notifications';
 
 const appviewRpc = (method) => ({
-  scope: `rpc:${method}?aud=${audParam(APPVIEW_SERVICE)}`,
+  scope: `rpc:${method}?aud=*`,
   purpose: READ_PURPOSE,
 });
 
@@ -31,7 +27,7 @@ export const REQUIRED_SCOPES = [
   appviewRpc('app.bsky.notification.listNotifications'),
   appviewRpc('app.bsky.feed.getAuthorFeed'),
   {
-    scope: `rpc:chat.bsky.convo.listConvos?aud=${audParam(CHAT_SERVICE)}`,
+    scope: 'rpc:chat.bsky.convo.listConvos?aud=*',
     purpose: 'include direct messages in interaction scoring',
   },
   {
