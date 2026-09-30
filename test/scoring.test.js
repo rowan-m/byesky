@@ -89,8 +89,22 @@ test('Scoring & Sanitization Helpers', async (t) => {
 
     assert.strictEqual(
       atUriToBskyUrl('at://did:plc:abc123/app.bsky.feed.post/3kxyz'),
-      'https://bsky.app/profile/did%3Aplc%3Aabc123/post/3kxyz',
+      'https://bsky.app/profile/did:plc:abc123/post/3kxyz',
     );
+    assert.strictEqual(
+      atUriToBskyUrl('at://did:web:example.com/app.bsky.feed.post/3kxyz'),
+      'https://bsky.app/profile/did:web:example.com/post/3kxyz',
+    );
+    assert.strictEqual(
+      atUriToBskyUrl('at://alice.bsky.social/app.bsky.feed.post/3kxyz'),
+      'https://bsky.app/profile/alice.bsky.social/post/3kxyz',
+    );
+    assert.strictEqual(
+      atUriToBskyUrl('at://did:plc:abc123'),
+      'https://bsky.app/profile/did:plc:abc123',
+    );
+    assert.strictEqual(atUriToBskyUrl('invalid-uri'), null);
+    assert.strictEqual(atUriToBskyUrl(null), null);
   });
 
   await t.test(

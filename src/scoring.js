@@ -33,10 +33,13 @@ export function atUriToBskyUrl(atUri) {
   const did = parts[0];
   const collection = parts[1]; // e.g. app.bsky.feed.post
   const rkey = parts[2]; // e.g. 3mv5fw5biui26
+  // DIDs (e.g. did:plc:..., did:web:...) contain colons which are valid path characters
+  // per RFC 3986 and must remain unencoded; encoding colons as %3A breaks bsky.app routing.
+  const actor = did && did.startsWith('did:') ? did : encodeURIComponent(did || '');
   if (did && collection === 'app.bsky.feed.post' && rkey) {
-    return `https://bsky.app/profile/${encodeURIComponent(did)}/post/${encodeURIComponent(rkey)}`;
+    return `https://bsky.app/profile/${actor}/post/${encodeURIComponent(rkey)}`;
   }
-  return did ? `https://bsky.app/profile/${encodeURIComponent(did)}` : null;
+  return did ? `https://bsky.app/profile/${actor}` : null;
 }
 
 export function escapeHTML(str) {
