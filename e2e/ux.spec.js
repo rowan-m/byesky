@@ -409,8 +409,19 @@ test('custom weights, filters, and thresholds persist across reloads and Reset d
   await expect(page.locator('#param-inactive-days')).toHaveValue('90');
   await expect(resetBtn).toBeVisible();
 
-  // Click Reset defaults and verify everything returns to defaults
+  // Click Reset defaults: modal opens, Cancel dismisses without resetting
   await resetBtn.click();
+  const resetModal = page.locator('#reset-confirm-modal');
+  await expect(resetModal).toBeVisible();
+  await page.locator('#reset-modal-cancel-btn').click();
+  await expect(resetModal).toBeHidden();
+  await expect(resetBtn).toBeVisible();
+
+  // Click Reset defaults again and confirm: resets to defaults and hides resetBtn
+  await resetBtn.click();
+  await expect(resetModal).toBeVisible();
+  await page.locator('#reset-modal-confirm-btn').click();
+  await expect(resetModal).toBeHidden();
   await expect(resetBtn).toBeHidden();
   await expect(
     page.locator('#weight-not-following + .weight-seg .weight-seg-btn[data-value="1"]'),
@@ -419,7 +430,7 @@ test('custom weights, filters, and thresholds persist across reloads and Reset d
   await expect(page.locator('#param-inactive-days')).toHaveValue('180');
 });
 
-test('clicking a criterion badge or sidebar Only button solos that filter and clicking again restores filters', async ({
+test('clicking a criterion badge or sidebar Only button solos that filter and clicking again restores all criteria', async ({
   page,
 }) => {
   const rows = page.locator('#table-body tr');
@@ -446,6 +457,25 @@ test('clicking a criterion badge or sidebar Only button solos that filter and cl
   await activeBadges.first().click();
   await expect(page.locator('#config-summary')).toHaveText('All shown');
   await expect(rows).toHaveCount(25);
+
+  // Test sidebar Only / All button toggle
+  if (page.viewportSize().width <= 1100) {
+    await page.locator('#config-toggle').click();
+  }
+  // Uncheck noisy poster
+  await page.locator('#filter-noisy').uncheck();
+  // Click Only on muted account
+  const mutedOnlyBtn = page.locator('.criteria-only-btn[data-filter-key="muted"]');
+  await mutedOnlyBtn.click();
+  await expect(mutedOnlyBtn).toHaveText('All');
+  await expect(page.locator('#filter-muted')).toBeChecked();
+  await expect(page.locator('#filter-noisy')).not.toBeChecked();
+
+  // Click All: ALL criteria should now be enabled
+  await mutedOnlyBtn.click();
+  await expect(mutedOnlyBtn).toHaveText('Only');
+  await expect(page.locator('#filter-noisy')).toBeChecked();
+  await expect(page.locator('#filter-muted')).toBeChecked();
 });
 
 test('batch unfollow Undo uses batchFollow in a single call', async ({ page }) => {

@@ -682,25 +682,36 @@ actor-typeahead::part(menu) {
 .sidebar-legend-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
 }
 
+.sidebar-footer {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
 .sidebar-reset-btn {
-  padding: 0;
-  border: 0;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--primary);
+  color: var(--danger);
   font-family: var(--font-family);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-align: center;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .sidebar-reset-btn:hover {
-  color: var(--primary-hover);
+  background-color: var(--danger);
+  color: var(--on-danger);
 }
 
 .sidebar-legend {

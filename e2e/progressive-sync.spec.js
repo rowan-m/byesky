@@ -17,7 +17,13 @@ test('progressive sync immediately shows dashboard and live updates rows', async
     patches: Object.fromEntries(
       Array.from({ length: 10 }, (_, i) => [
         i,
-        { criteria: { followersCount: 0, lastPostDate: null, unknown: ['profile', 'activity'] } },
+        {
+          criteria: {
+            followersCount: 0,
+            lastPostDate: null,
+            unknown: ['inbound', 'outbound', 'profile', 'activity'],
+          },
+        },
       ]),
     ),
   });
@@ -48,6 +54,8 @@ test('progressive sync immediately shows dashboard and live updates rows', async
   await expect(incompleteBadge).toHaveText('INCOMPLETE');
   await expect(incompleteBadge).toHaveAttribute('title', /is in progress/);
   await expect(incompleteBadge).not.toHaveAttribute('title', /Retry Incomplete/);
+  await expect(initialRow.locator('.flags-list')).not.toContainText('NO INBOUND');
+  await expect(initialRow.locator('.flags-list')).not.toContainText('NO OUTBOUND');
 
   // 4. Simulate a progressive batch update with enriched criteria
   const targetDid = await page.evaluate(async () => {

@@ -971,7 +971,7 @@ async function runSync(agent, userDid, onUpdate, signal) {
         followersCount: 0,
         followsCount: 0,
         postsCount: 0,
-        unknown: ['profile', 'activity'],
+        unknown: ['inbound', 'outbound', 'profile', 'activity'],
       },
       score: 0,
     };
@@ -1005,6 +1005,35 @@ async function runSync(agent, userDid, onUpdate, signal) {
       userOutboundInteractions,
       updateInteraction,
     });
+
+    for (const f of followingsList) {
+      if (inboundFailed) {
+        addUnknown(f, 'inbound');
+      } else {
+        removeUnknown(f, 'inbound');
+      }
+      if (interactions.likedBy.has(f.did)) f.criteria.hasLikedUser = true;
+      if (interactions.repostedBy.has(f.did)) f.criteria.hasRepostedUser = true;
+      if (interactions.repliedBy.has(f.did)) f.criteria.hasRepliedToUser = true;
+      if (interactions.messagedBy.has(f.did)) f.criteria.hasMessagedUser = true;
+      if (interactions.userInteractedWith.has(f.did)) f.criteria.userInteracted = true;
+      const lastInteraction = interactionsMap.get(f.did);
+      if (lastInteraction) f.criteria.lastInteraction = lastInteraction;
+    }
+
+    await save({
+      followings: followingsList,
+      interactions: {
+        likedBy: Array.from(interactions.likedBy),
+        repostedBy: Array.from(interactions.repostedBy),
+        repliedBy: Array.from(interactions.repliedBy),
+        messagedBy: Array.from(interactions.messagedBy),
+        userInteractedWith: Array.from(interactions.userInteractedWith),
+        userOutboundInteractions: Array.from(userOutboundInteractions),
+      },
+    });
+    if (onUpdate) onUpdate();
+
     outboundFailed = await scanOutboundInteractions({
       userDid,
       agent,
@@ -1016,44 +1045,36 @@ async function runSync(agent, userDid, onUpdate, signal) {
       outboundLikesMap,
       updateInteraction,
     });
+
+    for (const f of followingsList) {
+      if (outboundFailed) {
+        addUnknown(f, 'outbound');
+      } else {
+        removeUnknown(f, 'outbound');
+      }
+      if (userOutboundInteractions.has(f.did)) f.criteria.userContactedThem = true;
+      const lastLikeDate = outboundLikesMap.get(f.did);
+      if (lastLikeDate) f.criteria.lastLikeDate = lastLikeDate;
+      const lastInteraction = interactionsMap.get(f.did);
+      if (lastInteraction) f.criteria.lastInteraction = lastInteraction;
+    }
+
+    await save({
+      followings: followingsList,
+      interactions: {
+        likedBy: Array.from(interactions.likedBy),
+        repostedBy: Array.from(interactions.repostedBy),
+        repliedBy: Array.from(interactions.repliedBy),
+        messagedBy: Array.from(interactions.messagedBy),
+        userInteractedWith: Array.from(interactions.userInteractedWith),
+        userOutboundInteractions: Array.from(userOutboundInteractions),
+      },
+    });
+    if (onUpdate) onUpdate();
   } catch (err) {
     if (isCancel(err)) return;
     throw err;
   }
-
-  for (const f of followingsList) {
-    if (inboundFailed) addUnknown(f, 'inbound');
-    if (outboundFailed) addUnknown(f, 'outbound');
-    if (interactions.likedBy.has(f.did)) f.criteria.hasLikedUser = true;
-    if (interactions.repostedBy.has(f.did)) f.criteria.hasRepostedUser = true;
-    if (interactions.repliedBy.has(f.did)) f.criteria.hasRepliedToUser = true;
-    if (interactions.messagedBy.has(f.did)) f.criteria.hasMessagedUser = true;
-    if (interactions.userInteractedWith.has(f.did)) f.criteria.userInteracted = true;
-    if (userOutboundInteractions.has(f.did)) f.criteria.userContactedThem = true;
-
-    const lastLikeDate = outboundLikesMap.get(f.did);
-    if (lastLikeDate) {
-      f.criteria.lastLikeDate = lastLikeDate;
-    }
-
-    const lastInteraction = interactionsMap.get(f.did);
-    if (lastInteraction) {
-      f.criteria.lastInteraction = lastInteraction;
-    }
-  }
-
-  await save({
-    followings: followingsList,
-    interactions: {
-      likedBy: Array.from(interactions.likedBy),
-      repostedBy: Array.from(interactions.repostedBy),
-      repliedBy: Array.from(interactions.repliedBy),
-      messagedBy: Array.from(interactions.messagedBy),
-      userInteractedWith: Array.from(interactions.userInteractedWith),
-      userOutboundInteractions: Array.from(userOutboundInteractions),
-    },
-  });
-  if (onUpdate) onUpdate();
 
   try {
     await enrichProfiles({

@@ -54,5 +54,10 @@ export const modalDesc = document.getElementById('modal-desc');
 export const modalCancelBtn = document.getElementById('modal-cancel-btn');
 export const modalConfirmBtn = document.getElementById('modal-confirm-btn');
 
+// Reset Defaults Confirmation Modal Elements
+export const resetConfirmModal = document.getElementById('reset-confirm-modal');
+export const resetModalCancelBtn = document.getElementById('reset-modal-cancel-btn');
+export const resetModalConfirmBtn = document.getElementById('reset-modal-confirm-btn');
+
 // Singleton Rich Hover Preview Card
 export const hoverCard = document.getElementById('profile-hover-card');
