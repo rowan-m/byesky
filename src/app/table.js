@@ -707,7 +707,7 @@ export function renderDashboard(resetSelection = false) {
           cellContentHTML = `${relativeDateStr}${typeLabel}`;
         }
       } else {
-        cellContentHTML = `<span class="empty-interaction" title="No interaction found in your last ${SCAN_LIMIT_LABEL} notifications, posts, and likes">None in last ${SCAN_LIMIT_LABEL}</span>`;
+        cellContentHTML = `<span class="empty-interaction" title="No interaction found in your last ${SCAN_LIMIT_LABEL} notifications, posts, and likes">Not recently</span>`;
       }
 
       const displayNameHTML = truncateText(item.displayName || item.handle.split('.')[0], 16);
