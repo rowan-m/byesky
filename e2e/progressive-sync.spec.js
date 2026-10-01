@@ -39,6 +39,10 @@ test('progressive sync immediately shows dashboard and live updates rows', async
   await expect(initialRow.locator('td.col-followers')).toContainText('~');
   await expect(initialRow.locator('td.col-followers span')).toHaveAttribute('title', 'Pending');
   await expect(initialRow.locator('td.col-last-post')).toContainText('~');
+  const incompleteBadge = initialRow.locator('.flags-list .badge-info');
+  await expect(incompleteBadge).toHaveText('INCOMPLETE');
+  await expect(incompleteBadge).toHaveAttribute('title', /is in progress/);
+  await expect(incompleteBadge).not.toHaveAttribute('title', /Retry Incomplete/);
 
   // 4. Simulate a progressive batch update with enriched criteria
   const targetDid = await page.evaluate(async () => {

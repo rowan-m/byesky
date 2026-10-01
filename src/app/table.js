@@ -520,13 +520,11 @@ function renderCriteriaBadges(item) {
   const missing = item.evaluation.unknownSources;
   if (missing.length > 0) {
     const what = missing.map((s) => UNKNOWN_SOURCE_LABELS[s]).join(', ');
-    out.push(
-      badge(
-        'info',
-        `Couldn't fetch ${what} for this account, so criteria that depend on it are skipped. Click Retry Incomplete in the header to try again.`,
-        'INCOMPLETE',
-      ),
-    );
+    const inProgress = state.sync?.status === 'fetching' || state.sync?.status === 'enriching';
+    const tooltip = inProgress
+      ? `Fetching ${what} for this account is in progress. Criteria that depend on it will update once fetched.`
+      : `Couldn't fetch ${what} for this account, so criteria that depend on it are skipped. Click Retry Incomplete in the header to try again.`;
+    out.push(badge('info', tooltip, 'INCOMPLETE'));
   }
 
   return out.join('');
