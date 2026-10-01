@@ -520,13 +520,11 @@ function renderCriteriaBadges(item) {
   const missing = item.evaluation.unknownSources;
   if (missing.length > 0) {
     const what = missing.map((s) => UNKNOWN_SOURCE_LABELS[s]).join(', ');
-    out.push(
-      badge(
-        'info',
-        `Couldn't fetch ${what} for this account, so criteria that depend on it are skipped. Click Retry Incomplete in the header to try again.`,
-        'INCOMPLETE',
-      ),
-    );
+    const inProgress = state.sync?.status === 'fetching' || state.sync?.status === 'enriching';
+    const tooltip = inProgress
+      ? `Fetching ${what} for this account is in progress. Criteria that depend on it will update once fetched.`
+      : `Couldn't fetch ${what} for this account, so criteria that depend on it are skipped. Click Retry Incomplete in the header to try again.`;
+    out.push(badge('info', tooltip, 'INCOMPLETE'));
   }
 
   return out.join('');
@@ -659,8 +657,15 @@ export function renderDashboard(resetSelection = false) {
         row.classList.add('active-row');
       }
 
-      const isLowFollowers = item.evaluation.matches.lowFollowers === true;
-      const isPostInactive = item.neverPosted || item.dynamicInactive;
+      const isProfilePending = item.criteria.unknown?.includes('profile');
+      const isActivityPending = item.criteria.unknown?.includes('activity');
+      const isInteractionPending =
+        state.sync?.status === 'fetching' ||
+        (state.sync?.status === 'enriching' &&
+          ['notifications', 'ownPosts', 'likes'].includes(state.sync?.progress?.step?.id));
+
+      const isLowFollowers = !isProfilePending && item.evaluation.matches.lowFollowers === true;
+      const isPostInactive = !isActivityPending && (item.neverPosted || item.dynamicInactive);
 
       let isInteractionInactive = true;
       const lastInteractionDate = item.criteria.lastInteraction?.date || item.criteria.lastLikeDate;
@@ -670,14 +675,17 @@ export function renderDashboard(resetSelection = false) {
         const daysSinceInteraction = (Date.now() - lastInteractionMs) / (1000 * 60 * 60 * 24);
         isInteractionInactive = daysSinceInteraction > state.params.inactiveDays;
       }
+      const isInteractionHighlight = !isInteractionPending && isInteractionInactive;
 
       // Generate Last Interaction content with type label and bsky.app hyperlink
       const interactionInfo = item.criteria.lastInteraction;
       const renderDate = interactionInfo?.date || item.criteria.lastLikeDate;
-      const relativeDateStr = escapeHTML(formatRelativeDate(renderDate));
 
-      let cellContentHTML = relativeDateStr;
-      if (renderDate && relativeDateStr !== 'Never') {
+      let cellContentHTML;
+      if (isInteractionPending) {
+        cellContentHTML = '<span title="Pending">~</span>';
+      } else if (renderDate) {
+        const relativeDateStr = escapeHTML(formatRelativeDate(renderDate));
         let typeLabel = '';
         const safeType = escapeHTML(interactionInfo?.type || '');
         if (interactionInfo?.type) {
@@ -687,6 +695,7 @@ export function renderDashboard(resetSelection = false) {
             repost: 'Repost',
             message: 'DM',
             quote: 'Quote',
+            mention: 'Mention',
           };
           typeLabel = ` (${escapeHTML(typeMap[interactionInfo.type] || interactionInfo.type)})`;
         }
@@ -697,10 +706,20 @@ export function renderDashboard(resetSelection = false) {
         } else {
           cellContentHTML = `${relativeDateStr}${typeLabel}`;
         }
+      } else {
+        cellContentHTML = `<span class="empty-interaction" title="No interaction found in your last ${SCAN_LIMIT_LABEL} notifications, posts, and likes">Not recently</span>`;
       }
 
       const displayNameHTML = truncateText(item.displayName || item.handle.split('.')[0], 16);
       const handleHTML = truncateText('@' + item.handle, 20);
+
+      const followersHTML = isProfilePending
+        ? '<span title="Pending">~</span>'
+        : escapeHTML(formatCount(item.criteria.followersCount));
+
+      const lastPostHTML = isActivityPending
+        ? '<span title="Pending">~</span>'
+        : escapeHTML(formatRelativeDate(item.criteria.lastPostDate));
 
       let controlsHTML;
       if (isUnfollowed) {
@@ -747,9 +766,9 @@ export function renderDashboard(resetSelection = false) {
             <button type="button" class="preview-btn" aria-label="Preview @${safeHandle}" aria-haspopup="dialog">ⓘ</button>
           </div>
         </td>
-        <td class="col-meta col-followers ${isLowFollowers ? 'criteria-highlight' : ''}" data-label="Followers">${escapeHTML(formatCount(item.criteria.followersCount))}</td>
-        <td class="col-meta col-last-post ${isPostInactive ? 'criteria-highlight' : ''}" data-label="Last post">${escapeHTML(formatRelativeDate(item.criteria.lastPostDate))}</td>
-        <td class="col-meta col-last-interaction ${isInteractionInactive ? 'criteria-highlight' : ''}" data-label="Last interaction">${cellContentHTML}</td>
+        <td class="col-meta col-followers ${isLowFollowers ? 'criteria-highlight' : ''}" data-label="Followers">${followersHTML}</td>
+        <td class="col-meta col-last-post ${isPostInactive ? 'criteria-highlight' : ''}" data-label="Last post">${lastPostHTML}</td>
+        <td class="col-meta col-last-interaction ${isInteractionHighlight ? 'criteria-highlight' : ''}" data-label="Last interaction">${cellContentHTML}</td>
         <td class="col-flags">
           <div class="flags-list">${isUnfollowed ? badge('secondary', 'Unfollowed account', 'Unfollowed', 'unfollowed') : badgesHTML}</div>
         </td>

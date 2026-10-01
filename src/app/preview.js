@@ -1,8 +1,8 @@
-import { escapeHTML, sanitizeUrl } from '../scoring.js';
+import { escapeHTML, prepareFollowing, sanitizeUrl } from '../scoring.js';
 import { hoverCard, tableBody } from './dom.js';
 import { formatCount, formatMutualsCount, formatRelativeDate } from './format.js';
 import { atprotoApi, getFollowing, state } from './state.js';
-import { invalidateTableCache } from './table.js';
+import { invalidateTableCache, renderDashboard } from './table.js';
 
 let hoverShowTimeout = null;
 let hoverHideTimeout = null;
@@ -302,6 +302,7 @@ async function hydratePreview(rawItem) {
       rawItem.description = enriched.description ?? '';
       rawItem.preview = enriched.preview;
       rawItem._previewHydrated = true;
+      let criteriaChanged = false;
       if (
         enriched.mutualsCount !== undefined &&
         rawItem.criteria &&
@@ -309,7 +310,16 @@ async function hydratePreview(rawItem) {
       ) {
         rawItem.criteria.mutualsCount = enriched.mutualsCount;
         rawItem.criteria.hasMoreMutuals = enriched.hasMoreMutuals;
+        rawItem.criteria.isOutlier = enriched.mutualsCount === 0;
+        criteriaChanged = true;
+      }
+      if (enriched.preview?.lastPost && rawItem.criteria) {
+        criteriaChanged = true;
+      }
+      if (criteriaChanged) {
+        prepareFollowing(rawItem);
         invalidateTableCache();
+        renderDashboard(false);
       }
       return true;
     } finally {

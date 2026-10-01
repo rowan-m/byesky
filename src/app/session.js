@@ -135,18 +135,18 @@ async function resolveOwnHandle(api, did) {
       return repo.data.handle;
     }
   } catch (err) {
-    console.warn('PDS repo lookup failed, trying public profile:', err);
-  }
-  try {
-    const publicAgent = api.createAgent({ service: 'https://api.bsky.app' });
-    const handle = (await publicAgent.app.bsky.actor.getProfile({ actor: did })).data.handle;
-    if (handle && handle !== 'handle.invalid') return handle;
-  } catch (err) {
-    console.warn('Public profile lookup failed, trying via the PDS:', err);
+    console.warn('PDS repo lookup failed, trying profile:', err);
   }
   try {
     const viewer = api.createViewerAgent(state.agent);
     const handle = (await viewer.app.bsky.actor.getProfile({ actor: did })).data.handle;
+    if (handle && handle !== 'handle.invalid') return handle;
+  } catch (err) {
+    console.warn('Viewer profile lookup failed, trying public profile:', err);
+  }
+  try {
+    const publicAgent = api.createAgent({ service: 'https://api.bsky.app' });
+    const handle = (await publicAgent.app.bsky.actor.getProfile({ actor: did })).data.handle;
     if (handle && handle !== 'handle.invalid') return handle;
   } catch (err) {
     console.warn('Could not look up own handle; showing DID instead:', err);

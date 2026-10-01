@@ -25,7 +25,7 @@ import {
 import { formatLastSynced } from './format.js';
 import { hideLoading } from './session.js';
 import { atprotoApi, setFollowings, state } from './state.js';
-import { renderDashboard } from './table.js';
+import { invalidateTableCache, renderDashboard } from './table.js';
 
 // Tracks progress within the current step to estimate the time remaining.
 let etaSample = null;
@@ -56,12 +56,17 @@ export async function checkSyncStatus() {
       await triggerSync();
     } else if (cachedState.status === 'fetching' || cachedState.status === 'enriching') {
       resyncBtn.disabled = true;
-      showSyncSection(cachedState);
+      if (cachedState.followings?.length > 0) {
+        showSyncBanner(cachedState);
+      } else {
+        showSyncSection(cachedState);
+      }
       // Restart background sync in browser and attach update callback
       atprotoApi.startBackgroundSync(state.agent, state.user.did, onSyncUpdate);
     } else if (cachedState.status === 'completed') {
       resyncBtn.disabled = false;
       syncSection.classList.add('hidden');
+      syncSection.classList.remove('sync-banner');
       await loadFollowings();
     } else if (cachedState.status === 'cancelled') {
       resyncBtn.disabled = false;
@@ -124,9 +129,13 @@ async function applySyncUpdate() {
     state.sync = cachedState;
     renderLastSynced(cachedState);
 
+    const hasFollowings = (cachedState.followings?.length || 0) > 0;
+
     if (cachedState.status === 'completed') {
       resyncBtn.disabled = false;
       if (retryIncompleteBtn) retryIncompleteBtn.disabled = false;
+      syncSection.classList.add('hidden');
+      syncSection.classList.remove('sync-banner');
       await loadFollowings();
     } else if (cachedState.status === 'cancelled') {
       resyncBtn.disabled = false;
@@ -139,7 +148,12 @@ async function applySyncUpdate() {
     } else {
       resyncBtn.disabled = true;
       if (retryIncompleteBtn) retryIncompleteBtn.disabled = true;
-      updateSyncProgressUI(cachedState);
+
+      if (hasFollowings) {
+        showSyncBanner(cachedState);
+      } else {
+        updateSyncProgressUI(cachedState);
+      }
     }
   } catch (err) {
     console.warn('Sync update handling error:', err);
@@ -159,12 +173,40 @@ export async function loadFollowings() {
     hideLoading();
     authSection.classList.add('hidden');
     syncSection.classList.add('hidden');
+    syncSection.classList.remove('sync-banner');
     dashboardSection.classList.remove('hidden');
     resyncBtn.disabled = false;
     if (retryIncompleteBtn) retryIncompleteBtn.disabled = false;
+    invalidateTableCache();
     renderDashboard(true);
   } catch (err) {
     console.error('Load followings error:', err);
+  }
+}
+
+function showSyncBanner(syncState) {
+  hideLoading();
+  authSection.classList.add('hidden');
+  syncSection.classList.remove('hidden');
+  syncSection.classList.add('sync-banner');
+  syncError.classList.add('hidden');
+  cancelSyncBtn.classList.remove('hidden');
+  retrySyncBtn.classList.add('hidden');
+  resumeSyncBtn?.classList.add('hidden');
+  viewPartialBtn?.classList.add('hidden');
+
+  updateSyncProgressUI(syncState);
+
+  const firstTime = dashboardSection.classList.contains('hidden');
+  if (firstTime) {
+    dashboardSection.classList.remove('hidden');
+    setFollowings(syncState.followings || []);
+    invalidateTableCache();
+    renderDashboard(true);
+  } else {
+    setFollowings(syncState.followings || []);
+    invalidateTableCache();
+    renderDashboard(false);
   }
 }
 
@@ -176,7 +218,12 @@ function showSyncSection(syncState) {
   }
   hideLoading();
   authSection.classList.add('hidden');
+  if (syncState.followings?.length > 0) {
+    showSyncBanner(syncState);
+    return;
+  }
   dashboardSection.classList.add('hidden');
+  syncSection.classList.remove('sync-banner');
   syncSection.classList.remove('hidden');
   syncError.classList.add('hidden');
   cancelSyncBtn.classList.remove('hidden');

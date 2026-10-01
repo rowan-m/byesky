@@ -507,6 +507,39 @@ actor-typeahead::part(menu) {
   justify-content: center;
 }
 
+/* Incremental Sync Banner on Dashboard */
+#sync-section.sync-banner {
+  margin-bottom: 20px;
+  padding: 16px 20px;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+}
+
+#sync-section.sync-banner h2,
+#sync-section.sync-banner > .description {
+  display: none;
+}
+
+#sync-section.sync-banner .sync-step-title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+#sync-section.sync-banner .progress-container {
+  margin-top: 6px;
+}
+
+#sync-section.sync-banner .skip-mutuals {
+  margin-top: 10px;
+  padding: 8px 12px;
+}
+
+#sync-section.sync-banner .sync-actions {
+  margin-top: 10px;
+  justify-content: flex-end;
+}
+
 /* Dashboard Grid Layout */
 .dashboard-grid {
   display: grid;
@@ -649,25 +682,36 @@ actor-typeahead::part(menu) {
 .sidebar-legend-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
 }
 
+.sidebar-footer {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
 .sidebar-reset-btn {
-  padding: 0;
-  border: 0;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--primary);
+  color: var(--danger);
   font-family: var(--font-family);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-align: center;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .sidebar-reset-btn:hover {
-  color: var(--primary-hover);
+  background-color: var(--danger);
+  color: var(--on-danger);
 }
 
 .sidebar-legend {
@@ -1324,6 +1368,10 @@ abbr.truncated-text {
 .criteria-highlight {
   color: var(--warning);
   font-weight: 600;
+}
+
+.empty-interaction {
+  color: var(--text-muted);
 }
 
 /* Preview button: primary trigger on touch screens; keyboard-only fallback elsewhere */

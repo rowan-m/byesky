@@ -1,6 +1,11 @@
 import { CRITERIA, defaultFilters, defaultWeights, FILTER_CONTROLS } from '../criteria.js';
 import { clampParam, defaultParams } from '../scoring.js';
-import { resetConfigBtn } from './dom.js';
+import {
+  resetConfigBtn,
+  resetConfirmModal,
+  resetModalCancelBtn,
+  resetModalConfirmBtn,
+} from './dom.js';
 import { state } from './state.js';
 import { renderDashboard } from './table.js';
 
@@ -112,16 +117,11 @@ export function syncConfigDOMFromState() {
 export function toggleSoloFilter(targetKey) {
   const currentSolo = getSoloFilterKey();
   if (currentSolo === targetKey) {
-    const restored =
-      state.preSoloFilters && getSoloFilterKey(state.preSoloFilters) !== targetKey
-        ? { ...state.preSoloFilters }
-        : defaultFilters();
-    state.filters = restored;
+    // When toggling off solo mode via "All", enable all criteria
+    state.filters = Object.fromEntries(FILTER_CONTROLS.map(({ key }) => [key, true]));
     state.preSoloFilters = null;
   } else {
-    if (!currentSolo) {
-      state.preSoloFilters = { ...state.filters };
-    }
+    state.preSoloFilters = null;
     state.filters = Object.fromEntries(FILTER_CONTROLS.map(({ key }) => [key, key === targetKey]));
   }
   state.pagination.currentPage = 1;
@@ -161,6 +161,10 @@ export function setupConfigListeners() {
   for (const { id, label, filterId } of CRITERIA) {
     const checkbox = document.getElementById(filterId);
     const row = checkbox?.closest('.criteria-row');
+    const labelSpan = row?.querySelector('.checkbox-control span');
+    if (labelSpan && !labelSpan.title) {
+      labelSpan.title = label;
+    }
     const weightWrap = row?.querySelector('.criteria-weight');
     if (row && weightWrap && !row.querySelector('.criteria-only-btn')) {
       const onlyBtn = document.createElement('button');
@@ -198,7 +202,29 @@ export function setupConfigListeners() {
     });
   }
 
-  resetConfigBtn?.addEventListener('click', resetCriteriaConfig);
+  function closeResetModal() {
+    if (resetConfirmModal?.open) resetConfirmModal.close();
+  }
+
+  resetConfigBtn?.addEventListener('click', () => {
+    if (resetConfirmModal && !resetConfirmModal.open) {
+      resetConfirmModal.showModal();
+      resetModalCancelBtn?.focus();
+    }
+  });
+
+  resetModalCancelBtn?.addEventListener('click', closeResetModal);
+
+  resetModalConfirmBtn?.addEventListener('click', () => {
+    closeResetModal();
+    resetCriteriaConfig();
+  });
+
+  resetConfirmModal?.addEventListener('click', (e) => {
+    if (e.target === resetConfirmModal) {
+      closeResetModal();
+    }
+  });
 
   setupConfigPanel();
 

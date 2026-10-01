@@ -217,10 +217,11 @@ export async function withRetry(
 
 /**
  * Rates used for a sync. The PDS is shared with the user's other Bluesky apps, so it gets a
- * conservative budget (about a third of a typical 3,000 requests / 5 minutes per-IP limit).
+ * measured budget (~60% of a typical 3,000 requests / 5 minutes per-IP limit, backed by
+ * adaptive backoff).
  */
 export const SYNC_RATES = {
-  pds: { ratePerSecond: 3, burst: 3 },
+  pds: { ratePerSecond: 6, burst: 6 },
   appview: { ratePerSecond: 6, burst: 4 },
 };
 
