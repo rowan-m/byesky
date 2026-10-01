@@ -161,6 +161,10 @@ export function setupConfigListeners() {
   for (const { id, label, filterId } of CRITERIA) {
     const checkbox = document.getElementById(filterId);
     const row = checkbox?.closest('.criteria-row');
+    const labelSpan = row?.querySelector('.checkbox-control span');
+    if (labelSpan && !labelSpan.title) {
+      labelSpan.title = label;
+    }
     const weightWrap = row?.querySelector('.criteria-weight');
     if (row && weightWrap && !row.querySelector('.criteria-only-btn')) {
       const onlyBtn = document.createElement('button');
