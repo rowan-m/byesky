@@ -286,23 +286,43 @@ async function scanInboundInteractions({
       for (const notif of notifsList) {
         if (!notif.author) continue;
         const actorDid = notif.author.did;
+        const notifDate = notif.indexedAt || notif.record?.createdAt;
+        let notifType = null;
+        let notifLink = null;
+
         switch (notif.reason) {
           case 'like':
           case 'like-via-repost':
             interactions.likedBy.add(actorDid);
+            notifType = 'like';
+            notifLink = atUriToBskyUrl(notif.reasonSubject);
             break;
           case 'repost':
           case 'repost-via-repost':
             interactions.repostedBy.add(actorDid);
+            notifType = 'repost';
+            notifLink = atUriToBskyUrl(notif.reasonSubject);
             break;
           case 'reply':
             interactions.repliedBy.add(actorDid);
             interactions.userInteractedWith.add(actorDid);
+            notifType = 'reply';
+            notifLink = atUriToBskyUrl(notif.uri);
             break;
           case 'mention':
+            interactions.userInteractedWith.add(actorDid);
+            notifType = 'mention';
+            notifLink = atUriToBskyUrl(notif.uri);
+            break;
           case 'quote':
             interactions.userInteractedWith.add(actorDid);
+            notifType = 'quote';
+            notifLink = atUriToBskyUrl(notif.uri);
             break;
+        }
+
+        if (notifType && notifDate) {
+          updateInteraction(actorDid, notifDate, notifType, notifLink);
         }
       }
 
@@ -806,13 +826,13 @@ async function enrichActivityAndMutuals({
   return mutualsSkipped;
 }
 
-function createInteractionUpdater(outboundInteractionsMap) {
+function createInteractionUpdater(interactionsMap) {
   return function updateInteraction(targetDid, date, type, link) {
     if (!targetDid || !date) return;
-    const existing = outboundInteractionsMap.get(targetDid);
+    const existing = interactionsMap.get(targetDid);
     const newTime = new Date(date).getTime();
     if (!existing || newTime > new Date(existing.date).getTime()) {
-      outboundInteractionsMap.set(targetDid, { date, type, link });
+      interactionsMap.set(targetDid, { date, type, link });
     }
   };
 }
@@ -840,8 +860,8 @@ async function runSync(agent, userDid, onUpdate, signal) {
 
   const userOutboundInteractions = new Set();
   const outboundLikesMap = new Map();
-  const outboundInteractionsMap = new Map();
-  const updateInteraction = createInteractionUpdater(outboundInteractionsMap);
+  const interactionsMap = new Map();
+  const updateInteraction = createInteractionUpdater(interactionsMap);
 
   // Set initial loading state
   await save({
@@ -1016,7 +1036,7 @@ async function runSync(agent, userDid, onUpdate, signal) {
       f.criteria.lastLikeDate = lastLikeDate;
     }
 
-    const lastInteraction = outboundInteractionsMap.get(f.did);
+    const lastInteraction = interactionsMap.get(f.did);
     if (lastInteraction) {
       f.criteria.lastInteraction = lastInteraction;
     }
@@ -1125,8 +1145,8 @@ async function runIncompleteSync(agent, userDid, onUpdate, signal) {
   };
   const userOutboundInteractions = new Set(cached.interactions?.userOutboundInteractions || []);
   const outboundLikesMap = new Map();
-  const outboundInteractionsMap = new Map();
-  const updateInteraction = createInteractionUpdater(outboundInteractionsMap);
+  const interactionsMap = new Map();
+  const updateInteraction = createInteractionUpdater(interactionsMap);
 
   try {
     if (needsInbound) {
@@ -1175,7 +1195,7 @@ async function runIncompleteSync(agent, userDid, onUpdate, signal) {
         const lastLikeDate = outboundLikesMap.get(f.did);
         if (lastLikeDate) f.criteria.lastLikeDate = lastLikeDate;
 
-        const lastInteraction = outboundInteractionsMap.get(f.did);
+        const lastInteraction = interactionsMap.get(f.did);
         if (lastInteraction) f.criteria.lastInteraction = lastInteraction;
       }
 

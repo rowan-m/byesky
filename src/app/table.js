@@ -659,6 +659,10 @@ export function renderDashboard(resetSelection = false) {
 
       const isProfilePending = item.criteria.unknown?.includes('profile');
       const isActivityPending = item.criteria.unknown?.includes('activity');
+      const isInteractionPending =
+        state.sync?.status === 'fetching' ||
+        (state.sync?.status === 'enriching' &&
+          ['notifications', 'ownPosts', 'likes'].includes(state.sync?.progress?.step?.id));
 
       const isLowFollowers = !isProfilePending && item.evaluation.matches.lowFollowers === true;
       const isPostInactive = !isActivityPending && (item.neverPosted || item.dynamicInactive);
@@ -671,14 +675,17 @@ export function renderDashboard(resetSelection = false) {
         const daysSinceInteraction = (Date.now() - lastInteractionMs) / (1000 * 60 * 60 * 24);
         isInteractionInactive = daysSinceInteraction > state.params.inactiveDays;
       }
+      const isInteractionHighlight = !isInteractionPending && isInteractionInactive;
 
       // Generate Last Interaction content with type label and bsky.app hyperlink
       const interactionInfo = item.criteria.lastInteraction;
       const renderDate = interactionInfo?.date || item.criteria.lastLikeDate;
-      const relativeDateStr = escapeHTML(formatRelativeDate(renderDate));
 
-      let cellContentHTML = relativeDateStr;
-      if (renderDate && relativeDateStr !== 'Never') {
+      let cellContentHTML;
+      if (isInteractionPending) {
+        cellContentHTML = '<span title="Pending">~</span>';
+      } else if (renderDate) {
+        const relativeDateStr = escapeHTML(formatRelativeDate(renderDate));
         let typeLabel = '';
         const safeType = escapeHTML(interactionInfo?.type || '');
         if (interactionInfo?.type) {
@@ -688,6 +695,7 @@ export function renderDashboard(resetSelection = false) {
             repost: 'Repost',
             message: 'DM',
             quote: 'Quote',
+            mention: 'Mention',
           };
           typeLabel = ` (${escapeHTML(typeMap[interactionInfo.type] || interactionInfo.type)})`;
         }
@@ -698,6 +706,8 @@ export function renderDashboard(resetSelection = false) {
         } else {
           cellContentHTML = `${relativeDateStr}${typeLabel}`;
         }
+      } else {
+        cellContentHTML = `<span class="empty-interaction" title="No interaction found in your last ${SCAN_LIMIT_LABEL} notifications, posts, and likes">None in last ${SCAN_LIMIT_LABEL}</span>`;
       }
 
       const displayNameHTML = truncateText(item.displayName || item.handle.split('.')[0], 16);
@@ -758,7 +768,7 @@ export function renderDashboard(resetSelection = false) {
         </td>
         <td class="col-meta col-followers ${isLowFollowers ? 'criteria-highlight' : ''}" data-label="Followers">${followersHTML}</td>
         <td class="col-meta col-last-post ${isPostInactive ? 'criteria-highlight' : ''}" data-label="Last post">${lastPostHTML}</td>
-        <td class="col-meta col-last-interaction ${isInteractionInactive ? 'criteria-highlight' : ''}" data-label="Last interaction">${cellContentHTML}</td>
+        <td class="col-meta col-last-interaction ${isInteractionHighlight ? 'criteria-highlight' : ''}" data-label="Last interaction">${cellContentHTML}</td>
         <td class="col-flags">
           <div class="flags-list">${isUnfollowed ? badge('secondary', 'Unfollowed account', 'Unfollowed', 'unfollowed') : badgesHTML}</div>
         </td>

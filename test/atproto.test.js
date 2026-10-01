@@ -358,6 +358,36 @@ test('startBackgroundSync paginates follows, maps interactions, and enriches acc
     },
   );
 
+  await t.test('records inbound notification interactions with date, type, and link', async () => {
+    const nowIso = new Date().toISOString();
+    await syncCache.clear(userDid);
+    const { agent } = makeFakeAgents({
+      followsPages: [[{ did: 'did:plc:uros', handle: 'uros.dev' }]],
+      notifications: [
+        {
+          reason: 'like',
+          author: { did: 'did:plc:uros' },
+          indexedAt: nowIso,
+          reasonSubject: 'at://did:plc:me/app.bsky.feed.post/my-post-1',
+        },
+      ],
+      profiles: [{ did: 'did:plc:uros', followersCount: 500, followsCount: 200, postsCount: 10 }],
+      authorFeeds: { 'did:plc:uros': [] },
+    });
+
+    await startBackgroundSync(agent, userDid);
+    const cached = await syncCache.get(userDid);
+    const uros = cached.followings.find((f) => f.did === 'did:plc:uros');
+    assert.strictEqual(uros.criteria.hasLikedUser, true);
+    assert.ok(uros.criteria.lastInteraction);
+    assert.strictEqual(uros.criteria.lastInteraction.type, 'like');
+    assert.strictEqual(uros.criteria.lastInteraction.date, nowIso);
+    assert.strictEqual(
+      uros.criteria.lastInteraction.link,
+      'https://bsky.app/profile/did:plc:me/post/my-post-1',
+    );
+  });
+
   await t.test('skips chat scan when user profile has no chat service associated', async () => {
     await syncCache.clear(userDid);
     let chatCalled = false;

@@ -39,6 +39,11 @@ test('progressive sync immediately shows dashboard and live updates rows', async
   await expect(initialRow.locator('td.col-followers')).toContainText('~');
   await expect(initialRow.locator('td.col-followers span')).toHaveAttribute('title', 'Pending');
   await expect(initialRow.locator('td.col-last-post')).toContainText('~');
+  await expect(initialRow.locator('td.col-last-interaction')).toContainText('None in last 5,000');
+  await expect(initialRow.locator('td.col-last-interaction span')).toHaveAttribute(
+    'title',
+    /No interaction found in your last 5,000/,
+  );
   const incompleteBadge = initialRow.locator('.flags-list .badge-info');
   await expect(incompleteBadge).toHaveText('INCOMPLETE');
   await expect(incompleteBadge).toHaveAttribute('title', /is in progress/);

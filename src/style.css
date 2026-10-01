@@ -1359,6 +1359,10 @@ abbr.truncated-text {
   font-weight: 600;
 }
 
+.empty-interaction {
+  color: var(--text-muted);
+}
+
 /* Preview button: primary trigger on touch screens; keyboard-only fallback elsewhere */
 .preview-btn {
   flex-shrink: 0;
