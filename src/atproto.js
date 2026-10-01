@@ -39,10 +39,10 @@ export function createAgent(sessionOrOptions) {
 
 /**
  * How many of your most recent notifications, posts and likes each interaction scan reads.
- * Each page is 100 items, so this is 25 requests per scan.
+ * Each page is 100 items, so this is 50 requests per scan.
  */
 // Keep the badge tooltips in main.js in step if this changes.
-export const SCAN_LIMIT = 2500;
+export const SCAN_LIMIT = 5000;
 
 /** DM conversations are read 100 at a time, up to this many pages. */
 const MAX_CONVO_PAGES = 10;

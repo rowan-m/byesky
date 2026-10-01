@@ -6,7 +6,7 @@
 import { formatCount } from './app/format.js';
 
 // Keep in step with SCAN_LIMIT in atproto.js (not imported so the API bundle stays lazy).
-export const SCAN_LIMIT_LABEL = '2,500';
+export const SCAN_LIMIT_LABEL = '5,000';
 
 /**
  * Criteria in the order their badges are shown. Each badge is shown when its criterion

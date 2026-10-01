@@ -507,6 +507,39 @@ actor-typeahead::part(menu) {
   justify-content: center;
 }
 
+/* Incremental Sync Banner on Dashboard */
+#sync-section.sync-banner {
+  margin-bottom: 20px;
+  padding: 16px 20px;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+}
+
+#sync-section.sync-banner h2,
+#sync-section.sync-banner > .description {
+  display: none;
+}
+
+#sync-section.sync-banner .sync-step-title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+#sync-section.sync-banner .progress-container {
+  margin-top: 6px;
+}
+
+#sync-section.sync-banner .skip-mutuals {
+  margin-top: 10px;
+  padding: 8px 12px;
+}
+
+#sync-section.sync-banner .sync-actions {
+  margin-top: 10px;
+  justify-content: flex-end;
+}
+
 /* Dashboard Grid Layout */
 .dashboard-grid {
   display: grid;

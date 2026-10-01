@@ -659,8 +659,11 @@ export function renderDashboard(resetSelection = false) {
         row.classList.add('active-row');
       }
 
-      const isLowFollowers = item.evaluation.matches.lowFollowers === true;
-      const isPostInactive = item.neverPosted || item.dynamicInactive;
+      const isProfilePending = item.criteria.unknown?.includes('profile');
+      const isActivityPending = item.criteria.unknown?.includes('activity');
+
+      const isLowFollowers = !isProfilePending && item.evaluation.matches.lowFollowers === true;
+      const isPostInactive = !isActivityPending && (item.neverPosted || item.dynamicInactive);
 
       let isInteractionInactive = true;
       const lastInteractionDate = item.criteria.lastInteraction?.date || item.criteria.lastLikeDate;
@@ -701,6 +704,14 @@ export function renderDashboard(resetSelection = false) {
 
       const displayNameHTML = truncateText(item.displayName || item.handle.split('.')[0], 16);
       const handleHTML = truncateText('@' + item.handle, 20);
+
+      const followersHTML = isProfilePending
+        ? '<span title="Pending">~</span>'
+        : escapeHTML(formatCount(item.criteria.followersCount));
+
+      const lastPostHTML = isActivityPending
+        ? '<span title="Pending">~</span>'
+        : escapeHTML(formatRelativeDate(item.criteria.lastPostDate));
 
       let controlsHTML;
       if (isUnfollowed) {
@@ -747,8 +758,8 @@ export function renderDashboard(resetSelection = false) {
             <button type="button" class="preview-btn" aria-label="Preview @${safeHandle}" aria-haspopup="dialog">ⓘ</button>
           </div>
         </td>
-        <td class="col-meta col-followers ${isLowFollowers ? 'criteria-highlight' : ''}" data-label="Followers">${escapeHTML(formatCount(item.criteria.followersCount))}</td>
-        <td class="col-meta col-last-post ${isPostInactive ? 'criteria-highlight' : ''}" data-label="Last post">${escapeHTML(formatRelativeDate(item.criteria.lastPostDate))}</td>
+        <td class="col-meta col-followers ${isLowFollowers ? 'criteria-highlight' : ''}" data-label="Followers">${followersHTML}</td>
+        <td class="col-meta col-last-post ${isPostInactive ? 'criteria-highlight' : ''}" data-label="Last post">${lastPostHTML}</td>
         <td class="col-meta col-last-interaction ${isInteractionInactive ? 'criteria-highlight' : ''}" data-label="Last interaction">${cellContentHTML}</td>
         <td class="col-flags">
           <div class="flags-list">${isUnfollowed ? badge('secondary', 'Unfollowed account', 'Unfollowed', 'unfollowed') : badgesHTML}</div>
