@@ -426,7 +426,7 @@ test('startBackgroundSync paginates follows, maps interactions, and enriches acc
         resolveMutualsGate = resolve;
       });
 
-      // 10 accounts: with mutualsConcurrency=4, items 4-9 remain queued
+      // 10 accounts: with mutualsConcurrency=6, items 6-9 remain queued
       const accounts = Array.from({ length: 10 }, (_, i) => ({
         did: `did:plc:user${i}`,
         handle: `user${i}.bsky.social`,
@@ -487,8 +487,8 @@ test('startBackgroundSync paginates follows, maps interactions, and enriches acc
 
       assert.strictEqual(cached.status, 'completed');
       assert.strictEqual(cached.mutualsSkipped, true);
-      // Concurrency is 4, so at most 4 mutual requests started before skip was observed
-      assert.ok(mutualsCallCount <= 4, `Expected <= 4 calls, got ${mutualsCallCount}`);
+      // Concurrency is 6, so at most 6 mutual requests started before skip was observed
+      assert.ok(mutualsCallCount <= 6, `Expected <= 6 calls, got ${mutualsCallCount}`);
 
       // All 10 accounts should have their feeds enriched
       for (const a of accounts) {

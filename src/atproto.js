@@ -642,7 +642,7 @@ async function enrichActivityAndMutuals({
   if (onUpdate) onUpdate();
 
   const feedConcurrency = 6;
-  const mutualsConcurrency = 4;
+  const mutualsConcurrency = 6;
   let feedIndex = 0;
   let feedProcessed = 0;
   let mutualsIndex = 0;
