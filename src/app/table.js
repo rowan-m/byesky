@@ -616,6 +616,7 @@ export function renderDashboard(resetSelection = false) {
     emptyState.classList.remove('hidden');
   } else {
     emptyState.classList.add('hidden');
+    const fragment = document.createDocumentFragment();
     pageItems.forEach((item) => {
       const row = document.createElement('tr');
       row.dataset.did = item.did;
@@ -775,8 +776,9 @@ export function renderDashboard(resetSelection = false) {
         <td class="col-score score-cell ${scoreClass}">${escapeHTML(item.score)}</td>
       `;
 
-      tableBody.appendChild(row);
+      fragment.appendChild(row);
     });
+    tableBody.appendChild(fragment);
   }
 
   restoreFocusedRowControl(focusedTarget);
